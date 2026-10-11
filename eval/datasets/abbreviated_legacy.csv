@@ -1,0 +1,7 @@
+cust_mail,fnm,lnm,ph_no,co_nm,jt,acct_status,addr_ln1,zipcd,ctry,crt_dt,mktg_optin
+a.rao@gmail.com,Priya,Rao,631-555-0142,Acme Inc,Sales Manager,Active,12 Main St,11720,US,11/04/2023,Y
+jlee@acme.io,Jordan,Lee,212 555 0199,Contoso Ltd,CTO,PAYING,99 Broadway,10001,US,12/01/2023,N
+sam@contoso.com,Sam,Okafor,5165550123,Globex,Intern,churned 2024,7 Elm Rd,73301,US,01/15/2024,Y
+mia@globex.com,Mia,Chen,N/A,Globex,Analyst,Active-ish,1 Park Ave,02108,US,02/20/2024,N
+li@initech.com,Li,Wang,631 555 0177,Initech,Engineer,hot prospect,5 Pine Ln,11720,US,03/03/2024,Y
+raj@hooli.com,Raj,Patel,415-555-0101,Hooli,Designer,interested - call back,8 Oak Ct,94105,US,03/09/2024,N

@@ -1,0 +1,7 @@
+Id,FirstName,LastName,Email,Phone,MobilePhone,AccountName,Title,MailingCity,MailingState,MailingPostalCode,MailingCountry,LeadStatus,OwnerId,CreatedDate
+00Q5g00000AbC01,Priya,Rao,priya.rao@acme.com,+1 631-555-0142,+1 631-555-0199,Acme Inc,VP Sales,Centereach,NY,11720,USA,Open - Not Contacted,0055g00000Xy1,2024-03-02
+00Q5g00000AbC02,Jordan,Lee,jlee@contoso.com,(212) 555-0199,,Contoso Ltd,CTO,New York,NY,10001,USA,Working - Contacted,0055g00000Xy1,2024-03-05
+00Q5g00000AbC03,Sam,Okafor,sam.okafor@globex.io,516-555-0123,516-555-0177,Globex,Procurement Lead,Austin,TX,73301,USA,Closed - Converted,0055g00000Xy2,2024-04-11
+00Q5g00000AbC04,Mia,Chen,mia@initech.com,,,Initech,Analyst,Boston,MA,02108,USA,Closed - Not Converted,0055g00000Xy2,2024-05-20
+00Q5g00000AbC05,Luis,Gomez,lgomez@umbrella.co,+52 55 5555 0100,,Umbrella Corp,Director of IT,Mexico City,CDMX,06000,Mexico,Working - Contacted,0055g00000Xy3,2024-06-01
+00Q5g00000AbC06,Ana,Silva,ana.silva@hooli.com,+1 415 555 0133,,Hooli,Product Manager,San Francisco,CA,94105,USA,Open - Not Contacted,0055g00000Xy3,2024-06-14

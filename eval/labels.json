@@ -1,0 +1,55 @@
+{
+  "_comment": "Hand labels. columns: source column -> HubSpot property, or \"none\" (do not import). values: per enum column, source value -> option.",
+  "salesforce_style.csv": {
+    "columns": {
+      "Id": "none", "FirstName": "firstname", "LastName": "lastname", "Email": "email", "Phone": "phone",
+      "MobilePhone": "mobilephone", "AccountName": "company", "Title": "jobtitle", "MailingCity": "city",
+      "MailingState": "state", "MailingPostalCode": "zip", "MailingCountry": "country",
+      "LeadStatus": "lifecyclestage", "OwnerId": "none", "CreatedDate": "none"
+    },
+    "values": {
+      "LeadStatus": {
+        "Open - Not Contacted": "lead", "Working - Contacted": "lead",
+        "Closed - Converted": "customer", "Closed - Not Converted": "other"
+      }
+    }
+  },
+  "spreadsheet_style.csv": {
+    "columns": {
+      "First": "firstname", "Last": "lastname", "E-mail": "email", "Cell": "mobilephone",
+      "Organisation": "company", "Role": "jobtitle", "Town": "city", "Post Code": "zip",
+      "Stage": "lifecyclestage", "Notes": "none"
+    },
+    "values": {
+      "Stage": {
+        "Customer": "customer", "Hot": "opportunity", "New": "lead", "Lost": "other",
+        "Newsletter": "subscriber", "customer": "customer"
+      }
+    }
+  },
+  "abbreviated_legacy.csv": {
+    "columns": {
+      "cust_mail": "email", "fnm": "firstname", "lnm": "lastname", "ph_no": "phone", "co_nm": "company",
+      "jt": "jobtitle", "acct_status": "lifecyclestage", "addr_ln1": "address", "zipcd": "zip",
+      "ctry": "country", "crt_dt": "none", "mktg_optin": "none"
+    },
+    "values": {
+      "acct_status": {
+        "Active": "customer", "PAYING": "customer", "churned 2024": "other", "Active-ish": "customer",
+        "hot prospect": "opportunity", "interested - call back": "lead"
+      }
+    }
+  },
+  "crm_export.json": {
+    "columns": {
+      "contact_email": "email", "given_name": "firstname", "family_name": "lastname", "work_phone": "phone",
+      "employer": "company", "position": "jobtitle", "web": "website", "region": "state",
+      "customer_type": "lifecyclestage", "legacy_id": "none"
+    },
+    "values": {
+      "customer_type": {
+        "VIP client": "customer", "trial user": "lead", "ex-customer": "other", "subscriber": "subscriber"
+      }
+    }
+  }
+}

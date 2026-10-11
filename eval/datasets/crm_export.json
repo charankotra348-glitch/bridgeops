@@ -1,0 +1,9 @@
+{
+  "records": [
+    {"contact_email": "olu@paystack.co", "given_name": "Olu", "family_name": "Ade", "work_phone": "+234 1 555 0100", "employer": "Paystack", "position": "Engineer", "web": "https://paystack.com", "region": "Lagos", "customer_type": "VIP client", "legacy_id": "C-1001"},
+    {"contact_email": "kim@naver.com", "given_name": "Ji-woo", "family_name": "Kim", "work_phone": "+82 2 555 0199", "employer": "Naver", "position": "PM", "web": "www.naver.com", "region": "Seoul", "customer_type": "trial user", "legacy_id": "C-1002"},
+    {"contact_email": "eva@spotify.com", "given_name": "Eva", "family_name": "Berg", "work_phone": "+46 8 555 0123", "employer": "Spotify", "position": "Data Scientist", "web": "https://spotify.com", "region": "Stockholm", "customer_type": "ex-customer", "legacy_id": "C-1003"},
+    {"contact_email": "noah@shopify.com", "given_name": "Noah", "family_name": "Tremblay", "work_phone": "+1 613 555 0144", "employer": "Shopify", "position": "Merchant Success", "web": "https://shopify.com", "region": "Ontario", "customer_type": "subscriber", "legacy_id": "C-1004"},
+    {"contact_email": "zara@monzo.com", "given_name": "Zara", "family_name": "Khan", "work_phone": "", "employer": "Monzo", "position": "Ops Lead", "web": "", "region": "London", "customer_type": "VIP client", "legacy_id": "C-1005"}
+  ]
+}
