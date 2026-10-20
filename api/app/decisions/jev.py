@@ -11,7 +11,7 @@ import time
 
 import httpx
 
-from app.decisions.base import Decision, Question
+from app.decisions.base import CallUsage, Decision, Question
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ class JevProvider:
             timeout=timeout_s, headers={"Authorization": f"Bearer {api_key}"}
         )
         self._cache: dict[str, Decision] = {}
+        self.usage: list[CallUsage] = []
 
     # -- public -------------------------------------------------------------
     def decide(self, questions: list[Question]) -> list[Decision]:
@@ -69,9 +70,13 @@ class JevProvider:
             data = resp.json()
         except (httpx.HTTPError, ValueError) as exc:
             log.warning("Jev call failed: %s", exc)
+            self.usage.append(CallUsage(self.name, self.model, len(batch),
+                                        (time.perf_counter() - start) * 1000, error=str(exc)))
             return [Decision(key=q.key, answer=None, confidence=0.0, provider=self.name, error=str(exc))
                     for q in batch]
-        latency = (time.perf_counter() - start) * 1000 / max(len(batch), 1)
+        call_ms = (time.perf_counter() - start) * 1000
+        self.usage.append(CallUsage(self.name, self.model, len(batch), call_ms))
+        latency = call_ms / max(len(batch), 1)
 
         answers = data.get("answers", data)
         out = []

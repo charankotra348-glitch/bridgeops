@@ -44,8 +44,25 @@ class Decision:
         return self.answer is None
 
 
+@dataclass
+class CallUsage:
+    """One request to a decision model, as the provider reported it.
+
+    Token counts are None when the provider did not report them; they are never estimated.
+    """
+
+    provider: str
+    model: str
+    questions: int
+    latency_ms: float
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    error: str | None = None
+
+
 class DecisionProvider(Protocol):
     name: str
+    usage: list[CallUsage]       # one entry per request actually sent (cache hits add nothing)
 
     def decide(self, questions: list[Question]) -> list[Decision]:
         """Answer every question; must return one Decision per question, in order.

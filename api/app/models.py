@@ -1,10 +1,10 @@
-"""Database tables. Week 1 uses sources, jobs, mappings, decisions and audit_log;
-records, connections and users arrive in Weeks 3-4."""
+"""Database tables: sources, jobs, mappings, decisions, duplicate_groups and audit_log.
+Records, connections and users arrive in Weeks 3-4."""
 
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -49,6 +49,8 @@ class Job(Base):
 
     source: Mapped[Source] = relationship(back_populates="jobs")
     mappings: Mapped[list["Mapping"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    duplicates: Mapped[list["DuplicateGroup"]] = relationship(back_populates="job",
+                                                               cascade="all, delete-orphan")
 
 
 class Mapping(Base):
@@ -83,6 +85,25 @@ class Decision(Base):
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(20))  # auto | pending | approved | rejected
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DuplicateGroup(Base):
+    """Rows in one source that look like the same person. Flags only; execution decides
+    what to do with approved groups."""
+
+    __tablename__ = "duplicate_groups"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    rows: Mapped[list] = mapped_column(JSON)            # 0-based data row indices
+    reason: Mapped[str] = mapped_column(Text, default="")
+    method: Mapped[str] = mapped_column(String(20))     # rule | gemini | jev | human | none
+    confidence: Mapped[float] = mapped_column(Float)
+    same_person: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    status: Mapped[str] = mapped_column(String(20))     # auto | pending | approved | rejected
+    keep_row: Mapped[int | None] = mapped_column(Integer, nullable=True)  # row to import, set on review
+
+    job: Mapped[Job] = relationship(back_populates="duplicates")
 
 
 class AuditLog(Base):

@@ -10,16 +10,22 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     upload_dir: str = "./data/uploads"
     max_upload_mb: int = 25
+    auto_migrate: bool = True  # run Alembic migrations on startup; turn off when a deploy step runs them
 
-    decision_provider: str = "rules"  # "rules" | "jev"
+    decision_provider: str = "rules"  # "rules" | "gemini" | "jev"
     typesafe_api_key: str = ""
     typesafe_api_url: str = "https://api.typesafe.ai/v1/systemone"
     jev_model: str = "jev-latest"
     jev_timeout_s: float = 10.0
 
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_timeout_s: float = 30.0
+
     # Auto-accept thresholds (tuned later on the eval set)
     mapping_threshold: float = 0.80
     normalize_threshold: float = 0.85
+    duplicate_threshold: float = 0.85
 
 
 @lru_cache

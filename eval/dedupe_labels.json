@@ -1,0 +1,10 @@
+{
+  "_comment": "Duplicate-detection labels. Rows are 0-based data rows (header excluded). same_person lists every group of rows that are one real person; any other pair is different people. columns is the true column mapping, so this scores dedupe alone, not mapping errors. DRAFT: written by Claude, to be checked by a human before results are reported.",
+  "contacts_with_duplicates.csv": {
+    "columns": {
+      "Email": "email", "First Name": "firstname", "Last Name": "lastname", "Phone": "phone",
+      "Company": "company", "Title": "jobtitle", "City": "city"
+    },
+    "same_person": [[0, 1], [2, 3], [4, 5], [12, 13], [15, 16], [20, 21]]
+  }
+}

@@ -7,14 +7,23 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from app import models
+from app import migrate, models
 from app.config import get_settings
-from app.db import Base, engine, get_db
+from app.db import get_db
 from app.decisions import get_provider
+from app.dedupe import find_duplicates
 from app.mapping.pipeline import plan_mappings
 from app.mapping.target_schema import BY_NAME
-from app.profiling import ParseError, profile_file
-from app.schemas import JobCreate, JobOut, MappingOut, MappingUpdate, SourceOut
+from app.profiling import ParseError, profile_file, read_rows
+from app.schemas import (
+    DuplicateOut,
+    DuplicateUpdate,
+    JobCreate,
+    JobOut,
+    MappingOut,
+    MappingUpdate,
+    SourceOut,
+)
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
 log = logging.getLogger("bridgeops")
@@ -24,9 +33,10 @@ ALLOWED_SUFFIXES = {".csv", ".json", ".tsv", ".txt"}
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Week 1: create tables directly. Alembic migrations replace this in Week 2.
-    Base.metadata.create_all(engine)
-    Path(get_settings().upload_dir).mkdir(parents=True, exist_ok=True)
+    settings = get_settings()
+    if settings.auto_migrate:
+        migrate.upgrade(settings.database_url)
+    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -102,10 +112,24 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
     plan = plan_mappings(source.schema_json, provider, settings.mapping_threshold,
                          settings.normalize_threshold)
 
+    # Duplicates are found on the proposed mapping (including columns still pending review),
+    # so a reviewer sees them alongside the mapping decisions.
+    _, rows = read_rows(Path(source.storage_path).read_bytes(), source.filename)
+    dedupe = find_duplicates(rows, {c.column: c.target for c in plan.columns if c.target}, provider,
+                             settings.duplicate_threshold)
+    counts = {**plan.counts(), **dedupe.counts()}
+
     job = models.Job(source_id=source.id, provider=provider.name, status="mapped", stage="review",
-                     counts=plan.counts())
+                     counts=counts)
     db.add(job)
     db.flush()
+    for g in dedupe.groups:
+        db.add(models.DuplicateGroup(job_id=job.id, rows=g.rows, reason=g.reason, method=g.method,
+                                     confidence=g.confidence, same_person=g.same_person, status=g.status))
+    for q, d, status in dedupe.questions:
+        db.add(models.Decision(job_id=job.id, kind="duplicate", input_hash=q.input_hash(),
+                               subject=q.key[:255], answer=d.answer, confidence=d.confidence,
+                               provider=d.provider, latency_ms=d.latency_ms, status=status))
     for col in plan.columns:
         db.add(models.Mapping(job_id=job.id, source_column=col.column, target_property=col.target,
                               method=col.method, confidence=col.confidence, status=col.status,
@@ -116,11 +140,10 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
                                subject=rec.subject[:255], answer=rec.decision.answer,
                                confidence=rec.decision.confidence, provider=rec.decision.provider,
                                latency_ms=rec.decision.latency_ms, status=rec.status))
-    audit(db, "create", "job", job.id, after={"source_id": source.id, "provider": provider.name,
-                                              **plan.counts()})
+    audit(db, "create", "job", job.id, after={"source_id": source.id, "provider": provider.name, **counts})
     db.commit()
     db.refresh(job)
-    log.info("job %s mapped: %s", job.id, plan.counts())
+    log.info("job %s mapped: %s", job.id, counts)
     return job
 
 
@@ -173,3 +196,47 @@ def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(g
                  "value_map": mapping.value_map}, actor=body.actor)
     db.commit()
     return mapping
+
+
+# --------------------------------------------------------------------------- duplicates
+@app.get("/jobs/{job_id}/duplicates", response_model=list[DuplicateOut])
+def list_duplicates(job_id: str, pending_only: bool = False, db: Session = Depends(get_db)):
+    """Duplicate groups for a job, with the rows themselves so a reviewer can compare them."""
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    _, rows = read_rows(Path(job.source.storage_path).read_bytes(), job.source.filename)
+    groups = [g for g in job.duplicates if not pending_only or g.status == "pending"]
+    return [_duplicate_out(g, rows) for g in groups]
+
+
+@app.patch("/duplicates/{group_id}", response_model=DuplicateOut)
+def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends(get_db)):
+    """approved = these rows are one person (import keep_row only); rejected = different people."""
+    group = db.get(models.DuplicateGroup, group_id)
+    if not group:
+        raise HTTPException(404, "Duplicate group not found")
+    if body.status == "approved":
+        if body.keep_row is None or body.keep_row not in group.rows:
+            raise HTTPException(422, f"keep_row must be one of {group.rows}")
+    elif body.keep_row is not None:
+        raise HTTPException(422, "keep_row only applies when approving a duplicate group")
+
+    before = {"status": group.status, "same_person": group.same_person, "keep_row": group.keep_row}
+    group.status = body.status
+    group.same_person = body.status == "approved"
+    group.keep_row = body.keep_row
+    group.method, group.confidence = "human", 1.0
+    audit(db, "review", "duplicate_group", group.id, before=before,
+          after={"status": group.status, "same_person": group.same_person, "keep_row": group.keep_row},
+          actor=body.actor)
+    db.commit()
+    _, rows = read_rows(Path(group.job.source.storage_path).read_bytes(), group.job.source.filename)
+    return _duplicate_out(group, rows)
+
+
+def _duplicate_out(g: models.DuplicateGroup, rows: list[dict]) -> DuplicateOut:
+    return DuplicateOut(id=g.id, rows=g.rows, reason=g.reason, method=g.method, confidence=g.confidence,
+                        same_person=g.same_person, status=g.status, keep_row=g.keep_row,
+                        records=[{k: v for k, v in rows[i].items() if k is not None} for i in g.rows
+                                 if i < len(rows)])

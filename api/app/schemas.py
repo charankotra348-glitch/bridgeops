@@ -28,7 +28,7 @@ class SourceOut(BaseModel):
 
 class JobCreate(BaseModel):
     source_id: str
-    provider: Literal["rules", "jev"] | None = None
+    provider: Literal["rules", "gemini", "jev"] | None = None
 
 
 class ValueDecisionOut(BaseModel):
@@ -71,4 +71,24 @@ class MappingUpdate(BaseModel):
     target_property: str | None = None
     status: Literal["approved", "rejected"]
     value_map: dict[str, str | None] | None = None  # source value -> enum option
+    actor: str = "reviewer"
+
+
+class DuplicateOut(BaseModel):
+    id: str
+    rows: list[int]                 # 0-based data row indices in the source
+    reason: str
+    method: str
+    confidence: float
+    same_person: bool | None
+    status: str
+    keep_row: int | None
+    records: list[dict]             # the rows themselves, for side-by-side review
+
+
+class DuplicateUpdate(BaseModel):
+    """approved = same person, import only keep_row; rejected = different people, import all."""
+
+    status: Literal["approved", "rejected"]
+    keep_row: int | None = None
     actor: str = "reviewer"

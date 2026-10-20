@@ -1,0 +1,23 @@
+Email,First Name,Last Name,Phone,Company,Title,City
+priya.rao@acme.com,Priya,Rao,631-555-0142,Acme Inc,VP Sales,Centereach
+Priya.Rao@Acme.com,Priya,Rao,,Acme Inc,VP Sales,Centereach
+bob@acme.com,Bob,Smith,212-555-0100,Acme Inc,Engineer,New York
+robert.smith@gmail.com,Robert,Smith,,Acme Inc,Engineer,New York
+sam.okafor@globex.io,Sam,Okafor,516-555-0123,Globex,Procurement Lead,Austin
+sokafor@outlook.com,Samuel,Okafor,+1 (516) 555-0123,Globex,Procurement Lead,Austin
+ann.patel@initech.com,Ann,Patel,617-555-0101,Initech,Analyst,Boston
+ann.patel@umbrella.com,Ann,Patel,415-555-0188,Umbrella Corp,Nurse Manager,San Francisco
+jlee@contoso.com,Jordan,Lee,212-555-0199,Contoso,CTO,New York
+j.lee@contoso.com,Jamie,Lee,212-555-0145,Contoso,Designer,New York
+mia.chen@globex.com,Mia,Chen,617-555-0133,Globex,Analyst,Boston
+mia@chenconsulting.com,Mia,Chen,206-555-0190,Chen Consulting,Founder,Seattle
+li.wang@initech.com,Li,Wang,631-555-0177,Initech,Engineer,Centereach
+li.wang@initech.com,Li,Wang,631-555-0177,Initech,Engineer,Centereach
+grace@navy.mil,Grace,Hopper,555-010-2201,US Navy,Rear Admiral,Arlington
+olu@paystack.co,Olu,Ade,,Paystack,Engineer,Lagos
+oluwaseun.ade@paystack.co,Oluwaseun,Ade,+234 1 555 0100,Paystack,Engineer,Lagos
+kim.jiwoo@naver.com,Ji-woo,Kim,+82 2 555 0199,Naver,PM,Seoul
+jiwoo.kim@kakao.com,Ji-woo,Kim,+82 2 555 0144,Kakao,Engineer,Seoul
+noah@shopify.com,Noah,Tremblay,+1 613 555 0144,Shopify,Merchant Success,Ottawa
+eva@spotify.com,Eva,Berg,+46 8 555 0123,Spotify,Data Scientist,Stockholm
+eva.berg@spotify.com,Eva,Berg,,Spotify,Data Scientist,Stockholm

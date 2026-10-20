@@ -54,3 +54,36 @@ def test_job_review_and_human_approval(client):
 def test_unknown_source_and_job(client):
     assert client.post("/jobs", json={"source_id": "nope"}).status_code == 404
     assert client.get("/jobs/nope").status_code == 404
+
+
+DUP_CSV = (
+    "Email,First Name,Last Name,Phone,Company\n"
+    "priya@acme.com,Priya,Rao,631-555-0142,Acme\n"
+    "PRIYA@acme.com,Priya,Rao,,Acme\n"
+    "jlee@contoso.com,Jordan,Lee,212-555-0199,Contoso\n"
+    "jordan.lee@gmail.com,Jordan,Lee,,Contoso\n"
+)
+
+
+def test_duplicates_flagged_and_reviewed(client):
+    source_id = upload(client, content=DUP_CSV).json()["id"]
+    job = client.post("/jobs", json={"source_id": source_id}).json()
+    assert job["counts"]["duplicate_groups_auto"] == 1      # same email, any case
+    assert job["counts"]["duplicate_groups_pending"] == 1   # similar name: rules-only sends it to review
+
+    groups = client.get(f"/jobs/{job['id']}/duplicates").json()
+    by_rows = {tuple(g["rows"]): g for g in groups}
+    assert by_rows[(0, 1)]["method"] == "rule" and by_rows[(0, 1)]["status"] == "auto"
+    pending = by_rows[(2, 3)]
+    assert pending["status"] == "pending" and pending["records"][1]["Email"] == "jordan.lee@gmail.com"
+    assert [g["id"] for g in client.get(f"/jobs/{job['id']}/duplicates?pending_only=true").json()] \
+        == [pending["id"]]
+
+    assert client.patch(f"/duplicates/{pending['id']}", json={"status": "approved"}).status_code == 422
+    assert client.patch(f"/duplicates/{pending['id']}",
+                        json={"status": "approved", "keep_row": 0}).status_code == 422  # not in group
+    r = client.patch(f"/duplicates/{pending['id']}", json={"status": "approved", "keep_row": 2,
+                                                           "actor": "charan"})
+    assert r.status_code == 200, r.text
+    assert r.json()["same_person"] is True and r.json()["method"] == "human" and r.json()["keep_row"] == 2
+    assert client.patch("/duplicates/nope", json={"status": "rejected"}).status_code == 404
