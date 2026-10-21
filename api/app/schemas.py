@@ -92,3 +92,25 @@ class DuplicateUpdate(BaseModel):
     status: Literal["approved", "rejected"]
     keep_row: int | None = None
     actor: str = "reviewer"
+
+
+class ExecutionReportOut(BaseModel):
+    dry_run: bool
+    blockers: list[str]
+    counts: dict[str, int]
+    records: list[dict]             # dry run only: what would happen to each row (first 50)
+    definitions: str                # "hubspot" (live) or "built-in"
+    requests_sent: int
+    retries: int
+
+
+class ImportRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    row: int
+    email: str | None
+    status: str
+    hubspot_id: str | None
+    payload: dict
+    before: dict | None
+    error: str

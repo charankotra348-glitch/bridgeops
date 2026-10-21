@@ -103,3 +103,10 @@ OPTION_DESCRIPTIONS: dict[str, dict[str, str]] = {
 MAPPING_OPTIONS: dict[str, str] = {p.name: p.description for p in TARGET_PROPERTIES} | {
     "none": "No matching property; the column should not be imported",
 }
+
+
+def static_definitions() -> dict[str, dict]:
+    """Property definitions in the shape HubSpotClient.contact_properties() returns, from the
+    built-in list. Used for dry runs when no HubSpot token is configured."""
+    return {p.name: {"type": "enumeration" if p.type == "enum" else "string", "fieldType": p.type,
+                     "options": list(p.options), "readOnly": False} for p in TARGET_PROPERTIES}

@@ -4,19 +4,19 @@
 
 BridgeOps profiles an uploaded CSV/JSON export, maps its columns to HubSpot contact properties, normalizes values (e.g. `"Active-ish"` → `customer`), and gates every decision on confidence: confident decisions run automatically, uncertain ones go to a human review queue.
 
-> Status: **Week 2 of 5**: upload, schema inference, rules-first mapping, value normalization, duplicate detection, review API, Alembic migrations, and an eval harness that benchmarks rules vs an LLM (Gemini) vs Jev. Execution against HubSpot and the web UI land in Weeks 3–4.
+> Status: **Week 3 of 5**: the full pipeline from upload to HubSpot import works through the API: rules-first mapping, value normalization, duplicate detection, human review, dry run, idempotent batched import with retries and rate limiting, and rollback. An eval harness benchmarks rules vs an LLM (Gemini) vs Jev. The web UI lands in Week 4.
 
 ## How it works
 
 ```
-upload ─▶ Profile ─▶ Map ─▶ Normalize ─▶ Dedupe ─▶ Validate* ─▶ Execute*
-                       │        │           │
-                       ▼        ▼           ▼
-          Decision layer: rules first, then a decision model (Jev or Gemini)
+upload ─▶ Profile ─▶ Map ─▶ Normalize ─▶ Dedupe ─▶ Validate ─▶ Dry run ─▶ Execute ─▶ (Rollback)
+                       │        │           │          │                       │
+                       ▼        ▼           ▼          ▼                       ▼
+          Decision layer: rules first,              live HubSpot        batched upsert by email,
+          then a decision model (Jev or Gemini)     property defs       rate-limited, retried
                        │
                        ▼  confidence below threshold
                 Human review queue  ──▶  every change written to the audit log
-                                                          (* = Week 3)
 ```
 
 - **Rules first.** Deterministic rules (synonyms, abbreviations, value patterns, type checks) handle what they are sure of. A Y/N column named `email_opt_in` is *not* mapped to `email`, because its values don't look like emails.
@@ -25,6 +25,12 @@ upload ─▶ Profile ─▶ Map ─▶ Normalize ─▶ Dedupe ─▶ Validate*
 - **Confidence gating.** Each decision is auto-accepted only above its threshold: 0.80 for mappings, 0.90 for values, 0.85 for duplicates. Values were raised from 0.85 after the Gemini sweep (below).
 - **Measured, not guessed.** Every model request records its latency and the token counts the provider reported. Missing counts stay missing, and cost is always labeled an estimate.
 - **Fail safe.** If the model times out, errors, or answers outside the offered options, the decision abstains and goes to review. It is never auto-accepted.
+- **Nothing imports until review is done.** Execution refuses (409, with the list of blockers) while any mapping, value or duplicate group is pending. A dry run works at any time and shows, per row, whether it would be created, updated, skipped as unchanged, merged into a duplicate, or rejected as invalid.
+- **Validated against the real account.** Before import, every record is checked against HubSpot's live contact property definitions: the property must exist and be writable, enum values must be real options in that account, and every record needs a valid email (the import upserts by email).
+- **Safe to run twice.** Writes are batch upserts keyed by email, so a re-run never creates duplicate contacts. Rows already imported with the same values are skipped, rows whose values already match HubSpot are not written at all, and failed rows are retried.
+- **One bad record doesn't sink a batch.** HubSpot rejects a whole batch of up to 100 for one invalid value; the client splits the batch until the bad record is isolated, so the rest import and each failure is pinned to its own row.
+- **Within rate limits by design.** A client-side sliding window keeps requests under the private-app limit (100 per 10 seconds on Free/Starter; default 90), and 429/5xx responses are retried with backoff.
+- **Reversible.** Before writing, the current values of every property about to change are snapshotted. Rollback archives the contacts the job created and restores the ones it updated, except contacts someone has changed since the import, which are left alone and reported as conflicts. HubSpot only moves lifecycle stage forward through the API, so restoring an earlier stage clears it first.
 
 ## Quick start
 
@@ -51,7 +57,20 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' \
      -d '{"source_id": "<id>"}'                                                # -> mappings + gating
 curl localhost:8000/jobs/<job_id>/review                                       # -> what needs a human
 curl localhost:8000/jobs/<job_id>/duplicates                                   # -> rows that look like one person
+curl -X POST localhost:8000/jobs/<job_id>/dry-run                              # -> what an import would do
+curl -X POST localhost:8000/jobs/<job_id>/execute                              # -> import (needs HUBSPOT_TOKEN)
+curl -X POST localhost:8000/jobs/<job_id>/rollback                             # -> undo it
 ```
+
+### Checking against a real HubSpot account
+
+Create a free HubSpot developer **test** account and a private app in it with the scopes `crm.objects.contacts.read`, `crm.objects.contacts.write` and `crm.schemas.contacts.read`. Put its token in `.env` as `HUBSPOT_TOKEN`, then:
+
+```bash
+python scripts/live_import_check.py
+```
+
+It runs the whole flow on throwaway contacts (`@bridgeops-check.example`): dry run, import, re-run (must write nothing), rollback. It confirms each step in HubSpot and cleans up after itself. Never point it at a production portal.
 
 ## API
 
@@ -65,6 +84,10 @@ curl localhost:8000/jobs/<job_id>/duplicates                                   #
 | `PATCH` | `/mappings/{id}` | Approve/reject/correct a mapping or its value map (audited) |
 | `GET` | `/jobs/{id}/duplicates` | Duplicate groups with the rows side by side (`?pending_only=true`) |
 | `PATCH` | `/duplicates/{id}` | Approve (same person, import `keep_row` only) or reject (different people) (audited) |
+| `POST` | `/jobs/{id}/dry-run` | Per-row preview of the import; never writes. Works without a HubSpot token (built-in definitions) |
+| `POST` | `/jobs/{id}/execute` | Import into HubSpot. 409 with blockers while review is unfinished; safe to re-run (audited) |
+| `POST` | `/jobs/{id}/rollback` | Archive created contacts, restore updated ones, skip ones changed since (audited) |
+| `GET` | `/jobs/{id}/records` | What happened to each row (`?status=failed`), with the payload sent and the values it replaced |
 | `GET` | `/healthz` | Liveness |
 
 ## Evaluation
@@ -126,7 +149,13 @@ api/
     models.py            sources, jobs, mappings, decisions, duplicate_groups, audit_log
     migrate.py           runs Alembic migrations
   migrations/            Alembic revisions
-  tests/                 40 tests (profiling, rules, gating, providers, dedupe, migrations, API)
+    hubspot.py           HubSpot client: batches, rate limiter, retries, bad-record isolation
+    execution/
+      plan.py            reviewed decisions -> validated HubSpot records (pure, no network)
+      run.py             dry run, idempotent import, rollback with conflict detection
+  tests/                 54 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+scripts/
+  live_import_check.py   end-to-end check against a real HubSpot test account
 eval/                    labeled datasets, benchmark runner, threshold sweep, comparison report
 ```
 
@@ -134,6 +163,13 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 
 - [x] **Week 1**: upload, profiling, rules baseline, review API, audit log, eval harness, CI
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
-- [ ] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
+- [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
 - [ ] **Week 4**: React UI (mapping editor, review queue, job progress), auth, observability
 - [ ] **Week 5**: final benchmark on held-out data, deployment, demo
+
+## Known limits
+
+- **Imports run inside the request.** That suits exports of a few thousand rows (a few dozen batch requests). Larger files need a background worker, and Redis is already in the stack for it. Import speed against a real account is still to be measured.
+- **Contacts only.** Companies, deals and associations are out of scope.
+- **Rollback restores, it doesn't time-travel.** It reverts only the properties this job wrote, and leaves alone any contact that changed after the import.
+- **Matching HubSpot's normalization.** "Unchanged" and conflict checks compare values ignoring case and surrounding spaces. If HubSpot reformats a value in another way (a phone number, say), that record is reported as updated rather than unchanged.

@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -12,12 +13,16 @@ from app.config import get_settings
 from app.db import get_db
 from app.decisions import get_provider
 from app.dedupe import find_duplicates
+from app.execution import run as execution
+from app.hubspot import HubSpotClient, HubSpotError
 from app.mapping.pipeline import plan_mappings
-from app.mapping.target_schema import BY_NAME
+from app.mapping.target_schema import BY_NAME, static_definitions
 from app.profiling import ParseError, profile_file, read_rows
 from app.schemas import (
     DuplicateOut,
     DuplicateUpdate,
+    ExecutionReportOut,
+    ImportRecordOut,
     JobCreate,
     JobOut,
     MappingOut,
@@ -240,3 +245,109 @@ def _duplicate_out(g: models.DuplicateGroup, rows: list[dict]) -> DuplicateOut:
                         same_person=g.same_person, status=g.status, keep_row=g.keep_row,
                         records=[{k: v for k, v in rows[i].items() if k is not None} for i in g.rows
                                  if i < len(rows)])
+
+
+# --------------------------------------------------------------------------- execution
+_definitions_cache: dict[str, tuple[float, dict]] = {}
+DEFINITIONS_TTL_S = 600
+
+
+def get_hubspot() -> HubSpotClient | None:
+    """A HubSpot client, or None when no token is configured (dry runs still work)."""
+    settings = get_settings()
+    if not settings.hubspot_token:
+        return None
+    return HubSpotClient(settings.hubspot_token, settings.hubspot_base_url,
+                         settings.hubspot_requests_per_10s)
+
+
+def _definitions(client: HubSpotClient | None) -> tuple[dict, str]:
+    """Live contact property definitions (cached for 10 minutes), or the built-in list."""
+    if client is None:
+        return static_definitions(), "built-in"
+    cached = _definitions_cache.get("contacts")
+    if cached and time.monotonic() - cached[0] < DEFINITIONS_TTL_S:
+        return cached[1], "hubspot"
+    try:
+        defs = client.contact_properties()
+    except HubSpotError as exc:
+        raise HTTPException(502, f"Could not read HubSpot property definitions: {exc.message}") from exc
+    _definitions_cache["contacts"] = (time.monotonic(), defs)
+    return defs, "hubspot"
+
+
+def _job_and_rows(db: Session, job_id: str) -> tuple[models.Job, list[dict]]:
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    _, rows = read_rows(Path(job.source.storage_path).read_bytes(), job.source.filename)
+    return job, rows
+
+
+def _require(client: HubSpotClient | None) -> HubSpotClient:
+    if client is None:
+        raise HTTPException(503, "HUBSPOT_TOKEN is not configured; only dry runs are available")
+    return client
+
+
+def _report_out(report: execution.Report, source: str) -> ExecutionReportOut:
+    return ExecutionReportOut(dry_run=report.dry_run, blockers=report.blockers, counts=report.counts,
+                              records=report.records, definitions=source,
+                              requests_sent=report.requests_sent, retries=report.retries)
+
+
+@app.post("/jobs/{job_id}/dry-run", response_model=ExecutionReportOut)
+def dry_run_job(job_id: str, db: Session = Depends(get_db), client=Depends(get_hubspot)):
+    """What an import would do, without writing anything. Works without a HubSpot token."""
+    job, rows = _job_and_rows(db, job_id)
+    defs, source = _definitions(client)
+    try:
+        report = execution.dry_run(job, rows, defs, client)
+    except HubSpotError as exc:
+        raise HTTPException(502, exc.message) from exc
+    return _report_out(report, source)
+
+
+@app.post("/jobs/{job_id}/execute", response_model=ExecutionReportOut)
+def execute_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get_db),
+                client=Depends(get_hubspot)):
+    """Import the reviewed rows into HubSpot. Safe to re-run: done rows are skipped."""
+    client = _require(client)
+    job, rows = _job_and_rows(db, job_id)
+    defs, source = _definitions(client)
+    try:
+        report = execution.execute(db, job, rows, defs, client)
+    except execution.ExecutionError as exc:
+        raise HTTPException(exc.status_code, {"message": exc.message, "blockers": exc.details}) from exc
+    except HubSpotError as exc:
+        raise HTTPException(502, exc.message) from exc
+    audit(db, "execute", "job", job.id, after=report.counts, actor=actor)
+    db.commit()
+    return _report_out(report, source)
+
+
+@app.post("/jobs/{job_id}/rollback", response_model=ExecutionReportOut)
+def rollback_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get_db),
+                 client=Depends(get_hubspot)):
+    """Undo an import: archive created contacts, restore updated ones (unless changed since)."""
+    client = _require(client)
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    try:
+        report = execution.rollback(db, job, client)
+    except execution.ExecutionError as exc:
+        raise HTTPException(exc.status_code, exc.message) from exc
+    except HubSpotError as exc:
+        raise HTTPException(502, exc.message) from exc
+    audit(db, "rollback", "job", job.id, after=report.counts, actor=actor)
+    db.commit()
+    return _report_out(report, "hubspot")
+
+
+@app.get("/jobs/{job_id}/records", response_model=list[ImportRecordOut])
+def list_records(job_id: str, status: str | None = None, db: Session = Depends(get_db)):
+    job = db.get(models.Job, job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return sorted((r for r in job.records if status is None or r.status == status), key=lambda r: r.row)

@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_timeout_s: float = 30.0
 
+    hubspot_token: str = ""
+    hubspot_base_url: str = "https://api.hubapi.com"
+    hubspot_requests_per_10s: int = 90  # private apps on Free/Starter allow 100 per 10 s; keep headroom
+
     # Auto-accept thresholds. Values moved 0.85 -> 0.90 after the Gemini sweep (see README)
     mapping_threshold: float = 0.80
     normalize_threshold: float = 0.90

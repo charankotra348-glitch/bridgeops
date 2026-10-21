@@ -1,10 +1,9 @@
-"""Database tables: sources, jobs, mappings, decisions, duplicate_groups and audit_log.
-Records, connections and users arrive in Weeks 3-4."""
+"""Database tables: sources, jobs, mappings, decisions, duplicate_groups, import_records and audit_log."""
 
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -40,7 +39,8 @@ class Job(Base):
     workspace_id: Mapped[str] = mapped_column(String(32), default="default", index=True)
     source_id: Mapped[str] = mapped_column(ForeignKey("sources.id"))
     target: Mapped[str] = mapped_column(String(50), default="hubspot.contacts")
-    status: Mapped[str] = mapped_column(String(20), default="created")  # created|mapped|...
+    # mapped | executing | executed | executed_with_errors | rolling_back | rolled_back
+    status: Mapped[str] = mapped_column(String(30), default="created")
     stage: Mapped[str] = mapped_column(String(20), default="profile")
     provider: Mapped[str] = mapped_column(String(20))
     counts: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -51,6 +51,7 @@ class Job(Base):
     mappings: Mapped[list["Mapping"]] = relationship(back_populates="job", cascade="all, delete-orphan")
     duplicates: Mapped[list["DuplicateGroup"]] = relationship(back_populates="job",
                                                                cascade="all, delete-orphan")
+    records: Mapped[list["ImportRecord"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
 
 class Mapping(Base):
@@ -104,6 +105,29 @@ class DuplicateGroup(Base):
     keep_row: Mapped[int | None] = mapped_column(Integer, nullable=True)  # row to import, set on review
 
     job: Mapped[Job] = relationship(back_populates="duplicates")
+
+
+class ImportRecord(Base):
+    """What happened to one source row in the import, and what it overwrote (for rollback)."""
+
+    __tablename__ = "import_records"
+    __table_args__ = (UniqueConstraint("job_id", "row", name="uq_import_records_job_row"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    row: Mapped[int] = mapped_column(Integer)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    # created | updated | unchanged | failed | invalid | merged | rolled_back | rollback_failed
+    # | rollback_conflict
+    status: Mapped[str] = mapped_column(String(30))
+    hubspot_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)          # properties sent
+    payload_hash: Mapped[str] = mapped_column(String(64), default="")
+    before: Mapped[dict | None] = mapped_column(JSON, nullable=True)   # prior values of those properties
+    error: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    job: Mapped[Job] = relationship(back_populates="records")
 
 
 class AuditLog(Base):
