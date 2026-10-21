@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, ApiError, type Config, type DuplicateGroup, type Job, type Source, type Target } from "./api";
+import { api, ApiError, SIGNED_OUT, type Config, type DuplicateGroup, type Job, type Source, type Target } from "./api";
 import { outstanding, STAGES, stageOf, type Stage } from "./review";
 import { DryRunView } from "./views/DryRun";
 import { ImportView } from "./views/Import";
 import { ReviewView } from "./views/Review";
+import { SignInView } from "./views/SignIn";
 import { UploadView } from "./views/Upload";
 
 // The open job lives in the URL (#/jobs/<id>) so a reload or a shared link reopens it.
 const jobIdFromHash = () => window.location.hash.match(/^#\/jobs\/(\w+)/)?.[1] ?? null;
 
 export default function App() {
+  // undefined: still checking; null: signed out
+  const [user, setUser] = useState<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    api.me().then((u) => setUser(u.email)).catch(() => setUser(null));
+    const onSignedOut = () => setUser(null);
+    window.addEventListener(SIGNED_OUT, onSignedOut);
+    return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
+  }, []);
+
+  if (user === undefined) return null;
+  if (user === null) return <SignInView onSignedIn={setUser} />;
+  return <Console user={user} onSignOut={() => { void api.logout().finally(() => setUser(null)); }} />;
+}
+
+function Console({ user, onSignOut }: { user: string; onSignOut: () => void }) {
   const [config, setConfig] = useState<Config | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [jobId, setJobId] = useState<string | null>(jobIdFromHash);
@@ -53,6 +70,10 @@ export default function App() {
       <header className="masthead">
         <a className="wordmark" href="#/" onClick={() => setStage("upload")}>BridgeOps</a>
         {source && <span className="masthead-file">{source.filename}, {source.row_count} rows</span>}
+        <span className="masthead-user">
+          {user}
+          <button className="link" onClick={onSignOut}>Sign out</button>
+        </span>
       </header>
 
       <nav className="rail" aria-label="Import stages">

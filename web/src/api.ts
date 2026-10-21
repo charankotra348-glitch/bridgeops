@@ -122,11 +122,15 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when the API says the session is gone, so the app can show the sign-in screen. */
+export const SIGNED_OUT = "bridgeops:signed-out";
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   let resp: Response;
   try {
     resp = await fetch(BASE + path, {
       method,
+      credentials: "include",
       headers: body instanceof FormData || body === undefined ? {} : { "content-type": "application/json" },
       body: body instanceof FormData ? body : body === undefined ? undefined : JSON.stringify(body),
     });
@@ -134,6 +138,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     throw new ApiError(0, "Can't reach the BridgeOps API. Is it running on port 8000?");
   }
   const data = resp.status === 204 ? null : await resp.json().catch(() => null);
+  if (resp.status === 401 && !path.startsWith("/auth/")) {
+    window.dispatchEvent(new Event(SIGNED_OUT));
+  }
   if (!resp.ok) {
     const detail = data?.detail;
     if (detail && typeof detail === "object" && "message" in detail) {
@@ -145,6 +152,9 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export const api = {
+  me: () => call<{ email: string }>("GET", "/auth/me"),
+  login: (email: string, password: string) => call<{ email: string }>("POST", "/auth/login", { email, password }),
+  logout: () => call<null>("POST", "/auth/logout"),
   config: () => call<Config>("GET", "/config"),
   targets: () => call<Target[]>("GET", "/targets"),
   jobs: () => call<JobSummary[]>("GET", "/jobs"),
@@ -159,10 +169,10 @@ export const api = {
     call<Job>("POST", "/jobs", { source_id: sourceId, provider }),
   updateMapping: (id: string, body: { status: "approved" | "rejected"; target_property?: string | null;
     value_map?: Record<string, string | null> }) =>
-    call<Mapping>("PATCH", `/mappings/${id}`, { ...body, actor: "reviewer" }),
+    call<Mapping>("PATCH", `/mappings/${id}`, body),
   duplicates: (jobId: string) => call<DuplicateGroup[]>("GET", `/jobs/${jobId}/duplicates`),
   updateDuplicate: (id: string, body: { status: "approved" | "rejected"; keep_row?: number | null }) =>
-    call<DuplicateGroup>("PATCH", `/duplicates/${id}`, { ...body, actor: "reviewer" }),
+    call<DuplicateGroup>("PATCH", `/duplicates/${id}`, body),
   dryRun: (jobId: string) => call<Report>("POST", `/jobs/${jobId}/dry-run`),
   execute: (jobId: string) => call<Report>("POST", `/jobs/${jobId}/execute`),
   rollback: (jobId: string) => call<Report>("POST", `/jobs/${jobId}/rollback`),

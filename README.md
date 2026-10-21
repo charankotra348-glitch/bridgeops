@@ -47,6 +47,12 @@ pip install -r requirements.txt -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
+Create your account once (or set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in `.env` and it is created on startup):
+
+```bash
+python scripts/users.py create you@example.com
+```
+
 Then the review UI, in a second terminal (Node 20+):
 
 ```bash
@@ -91,6 +97,14 @@ Verified against a live HubSpot test account in October 2026: every check passed
 
 The open job is in the URL (`#/jobs/<id>`), so a reload or a shared link reopens it. Tests (Vitest + Testing Library) cover the review logic and the review screen; CI typechecks, tests and builds it.
 
+## Sign-in and logs
+
+- **Every route needs a signed-in user**, except `/healthz` and the sign-in endpoints. Imports write to a real CRM, so an anonymous visitor can't import, roll back or read uploaded files.
+- **Server-side sessions.** The browser gets a random token in an httpOnly, SameSite=Lax cookie; the database stores only its SHA-256. Signing out or expiry (12 hours by default) revokes it at once, which a self-contained JWT could not do. Set `COOKIE_SECURE=true` behind HTTPS.
+- **Passwords** are hashed with scrypt with a per-user salt. A wrong email and a wrong password get the same answer in the same time, and five failures for one email lock it for 15 minutes.
+- **The audit log names who did what** from the session. Clients used to send their own `actor` field; that is ignored now, so nobody can act under someone else's name.
+- **Logs are one JSON object per line.** Every request gets an id (kept from a safe incoming `X-Request-ID`, otherwise new), returned in the `X-Request-ID` header and attached to every line written while handling it, plus an access line with method, path, status, duration and user.
+
 ## API
 
 | Method | Path | Purpose |
@@ -110,7 +124,10 @@ The open job is in the URL (`#/jobs/<id>`), so a reload or a shared link reopens
 | `GET` | `/jobs` | Recent jobs with file name, row count, provider and status |
 | `GET` | `/targets` | HubSpot fields a column can map to, with enum options |
 | `GET` | `/config` | Which decision providers are configured and whether HubSpot is connected |
-| `GET` | `/healthz` | Liveness |
+| `GET` | `/healthz` | Liveness (no sign-in needed) |
+| `POST` | `/auth/login` | Sign in with `{email, password}`; sets the session cookie |
+| `POST` | `/auth/logout` | Sign out; revokes the session |
+| `GET` | `/auth/me` | Who is signed in |
 
 ## Evaluation
 
@@ -171,11 +188,14 @@ api/
     models.py            sources, jobs, mappings, decisions, duplicate_groups, audit_log
     migrate.py           runs Alembic migrations
   migrations/            Alembic revisions
+    auth.py              sign-in: scrypt passwords, server-side sessions, throttling
+    logs.py              JSON log lines with request ids, access log
+    users.py             create and list accounts from the command line
     hubspot.py           HubSpot client: batches, rate limiter, retries, bad-record isolation
     execution/
       plan.py            reviewed decisions -> validated HubSpot records (pure, no network)
       run.py             dry run, idempotent import, rollback with conflict detection
-  tests/                 58 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+  tests/                 69 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
 web/                     React review UI (Vite, TypeScript, Vitest)
   src/review.ts          what still needs a person; which stage a job is in
   src/views/             Upload, Review, DryRun, Import
@@ -189,7 +209,7 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [x] **Week 1**: upload, profiling, rules baseline, review API, audit log, eval harness, CI
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
-- [ ] **Week 4**: React review UI ✅ (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), auth, observability
+- [x] **Week 4**: React review UI (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), sign-in, structured request logs
 - [ ] **Week 5**: final benchmark on held-out data, deployment, demo
 
 ## Known limits

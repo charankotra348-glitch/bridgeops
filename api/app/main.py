@@ -5,13 +5,13 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app import migrate, models
+from app import auth, logs, migrate, models
 from app.config import get_settings
-from app.db import get_db
+from app.db import SessionLocal, get_db
 from app.decisions import get_provider
 from app.dedupe import find_duplicates
 from app.execution import run as execution
@@ -28,13 +28,15 @@ from app.schemas import (
     JobCreate,
     JobOut,
     JobSummaryOut,
+    LoginIn,
     MappingOut,
     MappingUpdate,
     SourceOut,
     TargetOut,
+    UserOut,
 )
 
-logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
+logs.configure()
 log = logging.getLogger("bridgeops")
 
 ALLOWED_SUFFIXES = {".csv", ".json", ".tsv", ".txt"}
@@ -45,13 +47,20 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     if settings.auto_migrate:
         migrate.upgrade(settings.database_url)
+    with SessionLocal() as db:
+        auth.bootstrap_admin(db)
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
 
 app = FastAPI(title="BridgeOps", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list(),
-                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["content-type"])
+app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list(), allow_credentials=True,
+                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["content-type"],
+                   expose_headers=[logs.HEADER])
+app.add_middleware(logs.RequestLogMiddleware)
+
+# Every route on this router needs a signed-in user; it is included at the end of the module.
+protected = APIRouter(dependencies=[Depends(auth.current_user)])
 
 
 def audit(db: Session, action: str, obj_type: str, obj_id: str, before=None, after=None, actor="system"):
@@ -64,9 +73,43 @@ def healthz():
     return {"status": "ok"}
 
 
+# --------------------------------------------------------------------------- sign-in
+@app.post("/auth/login", response_model=UserOut)
+def login(body: LoginIn, request: Request, response: Response, db: Session = Depends(get_db)):
+    email = auth.normalize_email(body.email)
+    wait = auth.throttle.retry_after(email)
+    if wait:
+        raise HTTPException(429, f"Too many failed sign-ins. Try again in {wait // 60 + 1} minutes.",
+                            headers={"Retry-After": str(wait)})
+    user = db.query(models.User).filter_by(email=email).first()
+    ok = auth.verify_password(body.password, user.password_hash if user else auth._DUMMY_HASH)
+    if not user or not ok:
+        auth.throttle.failed(email)
+        log.warning("sign-in failed", extra={"fields": {"email": email}})
+        raise HTTPException(401, "That email and password don't match an account")
+    auth.throttle.succeeded(email)
+    request.state.user = user.email
+    response.set_cookie(value=auth.start_session(db, user), **auth.cookie_args())
+    audit(db, "login", "user", user.id, actor=user.email)
+    db.commit()
+    return UserOut(email=user.email)
+
+
+@app.post("/auth/logout", status_code=204)
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    auth.end_session(db, request.cookies.get(auth.COOKIE))
+    response.delete_cookie(auth.COOKIE, path="/")
+
+
+@app.get("/auth/me", response_model=UserOut)
+def me(user: models.User = Depends(auth.current_user)):
+    return UserOut(email=user.email)
+
+
 # --------------------------------------------------------------------------- sources
-@app.post("/sources", response_model=SourceOut, status_code=201)
-async def upload_source(file: UploadFile, db: Session = Depends(get_db)):
+@protected.post("/sources", response_model=SourceOut, status_code=201)
+async def upload_source(file: UploadFile, db: Session = Depends(get_db),
+                        user: models.User = Depends(auth.current_user)):
     settings = get_settings()
     name = Path(file.filename or "upload.csv").name
     if Path(name).suffix.lower() not in ALLOWED_SUFFIXES:
@@ -88,13 +131,14 @@ async def upload_source(file: UploadFile, db: Session = Depends(get_db)):
                            file_format=profile.file_format, row_count=profile.row_count,
                            schema_json=profile.to_dict())
     db.add(source)
-    audit(db, "upload", "source", source_id, after={"filename": name, "rows": profile.row_count})
+    audit(db, "upload", "source", source_id, after={"filename": name, "rows": profile.row_count},
+          actor=user.email)
     db.commit()
     log.info("source %s uploaded: %s rows, %s columns", source_id, profile.row_count, len(profile.columns))
     return _source_out(source)
 
 
-@app.get("/sources/{source_id}", response_model=SourceOut)
+@protected.get("/sources/{source_id}", response_model=SourceOut)
 def get_source(source_id: str, db: Session = Depends(get_db)):
     source = db.get(models.Source, source_id)
     if not source:
@@ -109,8 +153,9 @@ def _source_out(source: models.Source) -> SourceOut:
 
 
 # --------------------------------------------------------------------------- jobs
-@app.post("/jobs", response_model=JobOut, status_code=201)
-def create_job(body: JobCreate, db: Session = Depends(get_db)):
+@protected.post("/jobs", response_model=JobOut, status_code=201)
+def create_job(body: JobCreate, db: Session = Depends(get_db),
+               user: models.User = Depends(auth.current_user)):
     settings = get_settings()
     source = db.get(models.Source, body.source_id)
     if not source:
@@ -151,21 +196,22 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
                                subject=rec.subject[:255], answer=rec.decision.answer,
                                confidence=rec.decision.confidence, provider=rec.decision.provider,
                                latency_ms=rec.decision.latency_ms, status=rec.status))
-    audit(db, "create", "job", job.id, after={"source_id": source.id, "provider": provider.name, **counts})
+    audit(db, "create", "job", job.id, after={"source_id": source.id, "provider": provider.name, **counts},
+          actor=user.email)
     db.commit()
     db.refresh(job)
     log.info("job %s mapped: %s", job.id, counts)
     return job
 
 
-@app.get("/jobs", response_model=list[JobSummaryOut])
+@protected.get("/jobs", response_model=list[JobSummaryOut])
 def list_jobs(limit: int = 50, db: Session = Depends(get_db)):
     jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).limit(min(limit, 200)).all()
     return [JobSummaryOut(id=j.id, filename=j.source.filename, rows=j.source.row_count, provider=j.provider,
                           status=j.status, created_at=j.created_at, counts=j.counts or {}) for j in jobs]
 
 
-@app.get("/targets", response_model=list[TargetOut])
+@protected.get("/targets", response_model=list[TargetOut])
 def list_targets():
     """HubSpot contact properties a column can map to, with enum options, for review dropdowns."""
     return [TargetOut(name=p.name, label=p.label, description=p.description, type=p.type,
@@ -174,7 +220,7 @@ def list_targets():
             for p in TARGET_PROPERTIES]
 
 
-@app.get("/config")
+@protected.get("/config")
 def client_config():
     """What this deployment can do, so a client can enable or hide actions."""
     s = get_settings()
@@ -184,7 +230,7 @@ def client_config():
             "default_provider": s.decision_provider}
 
 
-@app.get("/jobs/{job_id}", response_model=JobOut)
+@protected.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(models.Job, job_id)
     if not job:
@@ -192,7 +238,7 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     return job
 
 
-@app.get("/jobs/{job_id}/review", response_model=list[MappingOut])
+@protected.get("/jobs/{job_id}/review", response_model=list[MappingOut])
 def review_queue(job_id: str, db: Session = Depends(get_db)):
     """Columns needing a human: pending columns, or columns with any pending value."""
     job = db.get(models.Job, job_id)
@@ -223,8 +269,9 @@ def _value_map_for(mapping: models.Mapping, threshold: float) -> dict:
     return out
 
 
-@app.patch("/mappings/{mapping_id}", response_model=MappingOut)
-def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(get_db)):
+@protected.patch("/mappings/{mapping_id}", response_model=MappingOut)
+def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(get_db),
+                   user: models.User = Depends(auth.current_user)):
     mapping = db.get(models.Mapping, mapping_id)
     if not mapping:
         raise HTTPException(404, "Mapping not found")
@@ -254,13 +301,13 @@ def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(g
 
     audit(db, "review", "mapping", mapping.id, before=before,
           after={"target_property": mapping.target_property, "status": mapping.status,
-                 "value_map": mapping.value_map}, actor=body.actor)
+                 "value_map": mapping.value_map}, actor=user.email)
     db.commit()
     return mapping
 
 
 # --------------------------------------------------------------------------- duplicates
-@app.get("/jobs/{job_id}/duplicates", response_model=list[DuplicateOut])
+@protected.get("/jobs/{job_id}/duplicates", response_model=list[DuplicateOut])
 def list_duplicates(job_id: str, pending_only: bool = False, db: Session = Depends(get_db)):
     """Duplicate groups for a job, with the rows themselves so a reviewer can compare them."""
     job = db.get(models.Job, job_id)
@@ -271,8 +318,9 @@ def list_duplicates(job_id: str, pending_only: bool = False, db: Session = Depen
     return [_duplicate_out(g, rows) for g in groups]
 
 
-@app.patch("/duplicates/{group_id}", response_model=DuplicateOut)
-def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends(get_db)):
+@protected.patch("/duplicates/{group_id}", response_model=DuplicateOut)
+def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends(get_db),
+                     user: models.User = Depends(auth.current_user)):
     """approved = these rows are one person (import keep_row only); rejected = different people."""
     group = db.get(models.DuplicateGroup, group_id)
     if not group:
@@ -291,7 +339,7 @@ def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends
     group.method, group.confidence = "human", 1.0
     audit(db, "review", "duplicate_group", group.id, before=before,
           after={"status": group.status, "same_person": group.same_person, "keep_row": group.keep_row},
-          actor=body.actor)
+          actor=user.email)
     db.commit()
     _, rows = read_rows(Path(group.job.source.storage_path).read_bytes(), group.job.source.filename)
     return _duplicate_out(group, rows)
@@ -354,7 +402,7 @@ def _report_out(report: execution.Report, source: str) -> ExecutionReportOut:
                               reasons=report.reasons)
 
 
-@app.post("/jobs/{job_id}/dry-run", response_model=ExecutionReportOut)
+@protected.post("/jobs/{job_id}/dry-run", response_model=ExecutionReportOut)
 def dry_run_job(job_id: str, db: Session = Depends(get_db), client=Depends(get_hubspot)):
     """What an import would do, without writing anything. Works without a HubSpot token."""
     job, rows = _job_and_rows(db, job_id)
@@ -366,8 +414,8 @@ def dry_run_job(job_id: str, db: Session = Depends(get_db), client=Depends(get_h
     return _report_out(report, source)
 
 
-@app.post("/jobs/{job_id}/execute", response_model=ExecutionReportOut)
-def execute_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get_db),
+@protected.post("/jobs/{job_id}/execute", response_model=ExecutionReportOut)
+def execute_job(job_id: str, user: models.User = Depends(auth.current_user), db: Session = Depends(get_db),
                 client=Depends(get_hubspot)):
     """Import the reviewed rows into HubSpot. Safe to re-run: done rows are skipped."""
     client = _require(client)
@@ -379,13 +427,13 @@ def execute_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get_
         raise HTTPException(exc.status_code, {"message": exc.message, "blockers": exc.details}) from exc
     except HubSpotError as exc:
         raise HTTPException(502, exc.message) from exc
-    audit(db, "execute", "job", job.id, after=report.counts, actor=actor)
+    audit(db, "execute", "job", job.id, after=report.counts, actor=user.email)
     db.commit()
     return _report_out(report, source)
 
 
-@app.post("/jobs/{job_id}/rollback", response_model=ExecutionReportOut)
-def rollback_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get_db),
+@protected.post("/jobs/{job_id}/rollback", response_model=ExecutionReportOut)
+def rollback_job(job_id: str, user: models.User = Depends(auth.current_user), db: Session = Depends(get_db),
                  client=Depends(get_hubspot)):
     """Undo an import: archive created contacts, restore updated ones (unless changed since)."""
     client = _require(client)
@@ -398,14 +446,17 @@ def rollback_job(job_id: str, actor: str = "reviewer", db: Session = Depends(get
         raise HTTPException(exc.status_code, exc.message) from exc
     except HubSpotError as exc:
         raise HTTPException(502, exc.message) from exc
-    audit(db, "rollback", "job", job.id, after=report.counts, actor=actor)
+    audit(db, "rollback", "job", job.id, after=report.counts, actor=user.email)
     db.commit()
     return _report_out(report, "hubspot")
 
 
-@app.get("/jobs/{job_id}/records", response_model=list[ImportRecordOut])
+@protected.get("/jobs/{job_id}/records", response_model=list[ImportRecordOut])
 def list_records(job_id: str, status: str | None = None, db: Session = Depends(get_db)):
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     return sorted((r for r in job.records if status is None or r.status == status), key=lambda r: r.row)
+
+
+app.include_router(protected)

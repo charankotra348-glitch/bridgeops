@@ -27,6 +27,9 @@ _tmp = tempfile.mkdtemp(prefix="bridgeops-live-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/live.db"
 os.environ["UPLOAD_DIR"] = f"{_tmp}/uploads"
 os.environ.setdefault("DECISION_PROVIDER", "rules")
+# A throwaway account in the throwaway database; the real ADMIN_* settings are not used
+os.environ["ADMIN_EMAIL"] = "live-check@example.com"
+os.environ["ADMIN_PASSWORD"] = "live-check-" + os.urandom(8).hex()
 os.chdir(ROOT)                                  # so .env at the repo root is picked up
 sys.path.insert(0, str(ROOT / "api"))
 
@@ -78,6 +81,8 @@ def main() -> None:
     )
 
     with TestClient(app) as c:
+        c.post("/auth/login", json={"email": os.environ["ADMIN_EMAIL"],
+                                    "password": os.environ["ADMIN_PASSWORD"]}).raise_for_status()
         sid = c.post("/sources", files={"file": ("live.csv", csv.encode(), "text/csv")}).json()["id"]
         job = c.post("/jobs", json={"source_id": sid, "provider": "rules"}).json()
         jid = job["id"]

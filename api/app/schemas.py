@@ -71,7 +71,6 @@ class MappingUpdate(BaseModel):
     target_property: str | None = None
     status: Literal["approved", "rejected"]
     value_map: dict[str, str | None] | None = None  # source value -> enum option
-    actor: str = "reviewer"
 
 
 class DuplicateOut(BaseModel):
@@ -91,7 +90,6 @@ class DuplicateUpdate(BaseModel):
 
     status: Literal["approved", "rejected"]
     keep_row: int | None = None
-    actor: str = "reviewer"
 
 
 class ExecutionReportOut(BaseModel):
@@ -133,3 +131,12 @@ class TargetOut(BaseModel):
     description: str
     type: str
     options: list[dict]             # [{"value", "description"}] for enum properties
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class UserOut(BaseModel):
+    email: str

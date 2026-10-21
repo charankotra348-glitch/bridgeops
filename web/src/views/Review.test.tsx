@@ -45,7 +45,7 @@ test("accepting a suggested value sends the reviewer's decision", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Accept" }));
   const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("/api/mappings/m2");
-  expect(JSON.parse(init.body as string)).toEqual({ status: "approved", value_map: { Hot: "lead" }, actor: "reviewer" });
+  expect(JSON.parse(init.body as string)).toEqual({ status: "approved", value_map: { Hot: "lead" } });
   expect(onChanged).toHaveBeenCalled();
 });
 

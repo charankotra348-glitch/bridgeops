@@ -55,7 +55,25 @@ code { font-family: var(--mono); font-size: 0.8125rem; }
   background: var(--paper);
 }
 .wordmark { font-weight: 700; font-size: 1.125rem; color: var(--ink); text-decoration: none; letter-spacing: -0.02em; }
-.masthead-file { color: var(--steel); font-size: 0.875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.masthead-file { color: var(--steel); font-size: 0.875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.masthead-user { margin-left: auto; display: flex; gap: 0.75rem; align-items: baseline; color: var(--steel); font-size: 0.875rem; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- sign in */
+.signin { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+.signin-card {
+  width: min(26rem, 100%); display: grid; gap: 0.5rem;
+  padding: 2rem; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--paper);
+}
+.signin-card h1 { margin-top: 0.75rem; }
+.signin-card .lede { margin-bottom: 0.75rem; font-size: 0.9375rem; }
+.signin-card .btn { margin-top: 0.75rem; justify-content: center; }
+.signin-card .hint code { font-size: 0.75rem; }
+.field-label { font-weight: 600; font-size: 0.875rem; margin-top: 0.5rem; }
+input[type="email"], input[type="password"] {
+  min-height: 2.75rem; padding: 0 0.75rem;
+  border: 1px solid var(--line); border-radius: var(--radius-control);
+  background: #fff; color: var(--ink); font: inherit;
+}
 
 .rail { padding: 1.5rem 0.75rem; border-right: 1px solid var(--line); }
 .rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; position: sticky; top: 1.5rem; }
@@ -237,6 +255,8 @@ select {
   .provider-option { grid-template-columns: auto 1fr; }
   .provider-help { grid-column: 2; }
   h1 { font-size: 1.5rem; }
+  .masthead { flex-wrap: wrap; }
+  .masthead-file { order: 3; flex-basis: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

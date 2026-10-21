@@ -9,13 +9,30 @@ os.environ["DECISION_PROVIDER"] = "rules"
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app import auth  # noqa: E402
+from app.db import SessionLocal  # noqa: E402
 from app.main import app  # noqa: E402
+
+TEST_EMAIL, TEST_PASSWORD = "reviewer@example.com", "correct horse battery"
 
 
 @pytest.fixture
-def client():
+def anon():
+    """A client that is not signed in."""
+    auth.throttle = auth.LoginThrottle()
     with TestClient(app) as c:
+        with SessionLocal() as db:
+            if not db.query(auth.models.User).filter_by(email=TEST_EMAIL).first():
+                auth.create_user(db, TEST_EMAIL, TEST_PASSWORD)
         yield c
+
+
+@pytest.fixture
+def client(anon):
+    """A client signed in as the test reviewer."""
+    r = anon.post("/auth/login", json={"email": TEST_EMAIL, "password": TEST_PASSWORD})
+    assert r.status_code == 200, r.text
+    return anon
 
 
 MESSY_CSV = (
