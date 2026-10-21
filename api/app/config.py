@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,7 +9,6 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./bridgeops.db"
     redis_url: str = "redis://localhost:6379/0"
-    upload_dir: str = "./data/uploads"
     max_upload_mb: int = 25
     auto_migrate: bool = True  # run Alembic migrations on startup; turn off when a deploy step runs them
 
@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     mapping_threshold: float = 0.80
     normalize_threshold: float = 0.90
     duplicate_threshold: float = 0.85
+
+    # Built web UI to serve from the API (set in the Docker image); empty = API only
+    web_dist: str = ""
+
+    @field_validator("database_url")
+    @classmethod
+    def _psycopg_driver(cls, url: str) -> str:
+        """Hosts hand out postgres:// or postgresql:// URLs; SQLAlchemy needs the driver named."""
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix):]
+        return url
 
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

@@ -1,6 +1,8 @@
-// Typed client for the BridgeOps API. In development /api is proxied to FastAPI (vite.config.ts).
+// Typed client for the BridgeOps API.
+// Development: /api is proxied to FastAPI (vite.config.ts). Production: the API serves this UI
+// itself, so requests go to the same origin with no prefix. VITE_API_BASE overrides both.
 
-const BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? "/api" : "");
 
 export type Status = "auto" | "pending" | "approved" | "rejected";
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app import auth, logs, migrate, models
@@ -40,6 +42,9 @@ logs.configure()
 log = logging.getLogger("bridgeops")
 
 ALLOWED_SUFFIXES = {".csv", ".json", ".tsv", ".txt"}
+CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; "
+       "font-src https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'; "
+       "base-uri 'none'; form-action 'self'")
 
 
 @asynccontextmanager
@@ -49,7 +54,6 @@ async def lifespan(_: FastAPI):
         migrate.upgrade(settings.database_url)
     with SessionLocal() as db:
         auth.bootstrap_admin(db)
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -59,8 +63,25 @@ app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list
                    expose_headers=[logs.HEADER])
 app.add_middleware(logs.RequestLogMiddleware)
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("Content-Security-Policy", CSP)
+    return response
+
 # Every route on this router needs a signed-in user; it is included at the end of the module.
 protected = APIRouter(dependencies=[Depends(auth.current_user)])
+
+
+def _raw(source: models.Source) -> bytes:
+    try:
+        return source.raw()
+    except FileNotFoundError as exc:
+        raise HTTPException(410, "This upload's file is gone; upload the export again "
+                                 "to start a new job") from exc
 
 
 def audit(db: Session, action: str, obj_type: str, obj_id: str, before=None, after=None, actor="system"):
@@ -124,10 +145,8 @@ async def upload_source(file: UploadFile, db: Session = Depends(get_db),
         raise HTTPException(422, str(exc)) from exc
 
     source_id = uuid.uuid4().hex
-    path = Path(settings.upload_dir) / f"{source_id}{Path(name).suffix.lower()}"
-    path.write_bytes(raw)
 
-    source = models.Source(id=source_id, filename=name, storage_path=str(path),
+    source = models.Source(id=source_id, filename=name, content=raw,
                            file_format=profile.file_format, row_count=profile.row_count,
                            schema_json=profile.to_dict())
     db.add(source)
@@ -170,7 +189,7 @@ def create_job(body: JobCreate, db: Session = Depends(get_db),
 
     # Duplicates are found on the proposed mapping (including columns still pending review),
     # so a reviewer sees them alongside the mapping decisions.
-    _, rows = read_rows(Path(source.storage_path).read_bytes(), source.filename)
+    _, rows = read_rows(_raw(source), source.filename)
     dedupe = find_duplicates(rows, {c.column: c.target for c in plan.columns if c.target}, provider,
                              settings.duplicate_threshold)
     counts = {**plan.counts(), **dedupe.counts()}
@@ -313,7 +332,7 @@ def list_duplicates(job_id: str, pending_only: bool = False, db: Session = Depen
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    _, rows = read_rows(Path(job.source.storage_path).read_bytes(), job.source.filename)
+    _, rows = read_rows(_raw(job.source), job.source.filename)
     groups = [g for g in job.duplicates if not pending_only or g.status == "pending"]
     return [_duplicate_out(g, rows) for g in groups]
 
@@ -341,7 +360,7 @@ def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends
           after={"status": group.status, "same_person": group.same_person, "keep_row": group.keep_row},
           actor=user.email)
     db.commit()
-    _, rows = read_rows(Path(group.job.source.storage_path).read_bytes(), group.job.source.filename)
+    _, rows = read_rows(_raw(group.job.source), group.job.source.filename)
     return _duplicate_out(group, rows)
 
 
@@ -385,7 +404,7 @@ def _job_and_rows(db: Session, job_id: str) -> tuple[models.Job, list[dict]]:
     job = db.get(models.Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    _, rows = read_rows(Path(job.source.storage_path).read_bytes(), job.source.filename)
+    _, rows = read_rows(_raw(job.source), job.source.filename)
     return job, rows
 
 
@@ -460,3 +479,23 @@ def list_records(job_id: str, status: str | None = None, db: Session = Depends(g
 
 
 app.include_router(protected)
+
+
+# --------------------------------------------------------------------------- web UI
+# In the deployed image the built UI is served from here, so UI and API share one origin:
+# the session cookie needs no cross-site handling and no CORS is involved.
+def mount_web(target: FastAPI, dist: str) -> bool:
+    """Serve the built UI from `dist` (index.html + assets/). Returns whether it was mounted."""
+    web = Path(dist) if dist else None
+    if not web or not (web / "index.html").exists():
+        return False
+    target.mount("/assets", StaticFiles(directory=web / "assets"), name="assets")
+
+    @target.get("/", include_in_schema=False)
+    def web_index():
+        return FileResponse(web / "index.html", headers={"Cache-Control": "no-cache"})
+
+    return True
+
+
+mount_web(app, get_settings().web_dist)

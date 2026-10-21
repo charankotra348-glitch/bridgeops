@@ -2,8 +2,8 @@ import os
 import tempfile
 
 _tmp = tempfile.mkdtemp(prefix="bridgeops-test-")
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
-os.environ["UPLOAD_DIR"] = f"{_tmp}/uploads"
+# TEST_DATABASE_URL runs the suite against another database, e.g. Postgres in CI
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_tmp}/test.db"
 os.environ["DECISION_PROVIDER"] = "rules"
 
 import pytest  # noqa: E402

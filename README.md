@@ -97,6 +97,20 @@ Verified against a live HubSpot test account in October 2026: every check passed
 
 The open job is in the URL (`#/jobs/<id>`), so a reload or a shared link reopens it. Tests (Vitest + Testing Library) cover the review logic and the review screen; CI typechecks, tests and builds it.
 
+## Deploying
+
+The production image (`Dockerfile` at the repo root) builds the UI and serves it from the API on one origin, so the session cookie needs no cross-site setup. Migrations run on startup, uploaded files are stored in the database (hosts with throwaway disks lose nothing on restart), and the first account comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+
+On Render's free plan with a free Neon Postgres ($0):
+
+1. Create a Neon project and copy its connection string (`postgresql://...?sslmode=require`).
+2. In Render, choose **New → Blueprint**, pick this repo, and fill in the values `render.yaml` asks for: `DATABASE_URL` (the Neon string), `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `HUBSPOT_TOKEN` (test account) and `GEMINI_API_KEY`.
+3. Render builds the image and deploys after CI passes. Sign in with the admin account.
+
+Free-plan limits: the service sleeps after 15 minutes without traffic and takes about a minute to wake; Neon's compute also suspends when idle and wakes on the first query. Render's own free Postgres is not used because Render deletes it after 30 days.
+
+CI runs the API suite on SQLite and on Postgres 16, builds the production image, and smoke-tests it (health check, UI served, API refusing anonymous requests).
+
 ## Sign-in and logs
 
 - **Every route needs a signed-in user**, except `/healthz` and the sign-in endpoints. Imports write to a real CRM, so an anonymous visitor can't import, roll back or read uploaded files.
@@ -195,7 +209,7 @@ api/
     execution/
       plan.py            reviewed decisions -> validated HubSpot records (pure, no network)
       run.py             dry run, idempotent import, rollback with conflict detection
-  tests/                 69 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+  tests/                 74 tests (run on SQLite and Postgres), incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
 web/                     React review UI (Vite, TypeScript, Vitest)
   src/review.ts          what still needs a person; which stage a job is in
   src/views/             Upload, Review, DryRun, Import
@@ -210,7 +224,7 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
 - [x] **Week 4**: React review UI (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), sign-in, structured request logs
-- [ ] **Week 5**: final benchmark on held-out data, deployment, demo
+- [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), final benchmark on held-out data, demo
 
 ## Known limits
 

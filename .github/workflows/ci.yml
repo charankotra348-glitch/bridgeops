@@ -23,6 +23,34 @@ jobs:
       - name: Test
         run: pytest -q
 
+  api-postgres:
+    # The deployment runs on Postgres; the same suite runs against it here.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: bridgeops
+          POSTGRES_PASSWORD: bridgeops
+          POSTGRES_DB: bridgeops_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bridgeops" --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: api
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://bridgeops:bridgeops@localhost:5432/bridgeops_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Test on Postgres
+        run: pytest -q
+
   eval:
     runs-on: ubuntu-latest
     needs: api
@@ -38,11 +66,20 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    needs: api
+    needs: [api, web]
     steps:
       - uses: actions/checkout@v4
-      - name: Build API image
+      - name: Build API image (docker compose)
         run: docker build -t bridgeops-api ./api
+      - name: Build production image (API + UI)
+        run: docker build -t bridgeops .
+      - name: Smoke-test the production image
+        run: |
+          docker run -d --name app -p 8000:8000 -e DATABASE_URL=sqlite:////tmp/smoke.db bridgeops
+          for i in $(seq 1 30); do curl -fs localhost:8000/healthz && break; sleep 1; done
+          curl -fs localhost:8000/ | grep -q "<title>BridgeOps</title>"
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/jobs)" = 401
+          docker logs app | tail -5
 
   web:
     runs-on: ubuntu-latest

@@ -3,8 +3,20 @@ users and auth_sessions."""
 
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -24,13 +36,24 @@ class Source(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
     workspace_id: Mapped[str] = mapped_column(String(32), default="default", index=True)
     filename: Mapped[str] = mapped_column(String(255))
-    storage_path: Mapped[str] = mapped_column(String(512))
+    # The uploaded file itself, so a deployment with a throwaway disk keeps it across restarts.
+    # Deferred: loaded only when the rows are read, not with every source query.
+    content: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)  # uploads before 0005
     file_format: Mapped[str] = mapped_column(String(10))
     row_count: Mapped[int] = mapped_column(Integer)
     schema_json: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="source")
+
+    def raw(self) -> bytes:
+        """The uploaded bytes: from the database, or from disk for uploads made before 0005."""
+        if self.content is not None:
+            return self.content
+        if self.storage_path and Path(self.storage_path).exists():
+            return Path(self.storage_path).read_bytes()
+        raise FileNotFoundError(f"the file for source {self.id} is no longer available")
 
 
 class Job(Base):

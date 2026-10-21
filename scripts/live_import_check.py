@@ -25,7 +25,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 _tmp = tempfile.mkdtemp(prefix="bridgeops-live-")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/live.db"
-os.environ["UPLOAD_DIR"] = f"{_tmp}/uploads"
 os.environ.setdefault("DECISION_PROVIDER", "rules")
 # A throwaway account in the throwaway database; the real ADMIN_* settings are not used
 os.environ["ADMIN_EMAIL"] = "live-check@example.com"
