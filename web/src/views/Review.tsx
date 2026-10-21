@@ -132,7 +132,7 @@ function MappingRow({ mapping: m, samples, targets, locked, act }: {
   return (
     <li className={`crossing${m.status === "pending" ? " is-pending" : ""}${m.status === "rejected" ? " is-skipped" : ""}`}>
       <div className="crossing-source">
-        <span className="col-name">{m.source_column}</span>
+        <span className="col-name">{m.source_column.trim() || <span className="blank">Column with no name</span>}</span>
         <span className="samples">{samples.slice(0, 4).map((s) => <code key={s}>{s}</code>)}</span>
       </div>
 

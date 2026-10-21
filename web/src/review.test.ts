@@ -1,5 +1,6 @@
 import type { DuplicateGroup, Job, Mapping } from "./api";
 import { fixFor } from "./views/DryRun";
+import { afterImport } from "./views/Import";
 import { decidedBy, needsReview, outstanding, pendingValues, stageOf } from "./review";
 
 const mapping = (over: Partial<Mapping> = {}): Mapping => ({
@@ -48,4 +49,10 @@ test("each rejection reason comes with a fix", () => {
   expect(fixFor("no email: the import upserts by email, so every record needs one")).toMatch(/map the email column/);
   expect(fixFor("invalid email '…'")).toMatch(/doesn't hold email addresses/);
   expect(fixFor("'…' is not an option of '…' in this HubSpot account")).toMatch(/Translate this value/);
+});
+
+test("after an import, invalid rows aren't presented as retryable", () => {
+  expect(afterImport(32, 0, 2)).toBe("32 rows are in HubSpot. 2 rows were never sent because the data isn't valid. " +
+    "Retrying won't change that: fix those rows in the file and upload it again.");
+  expect(afterImport(10, 3, 0)).toBe("10 rows are in HubSpot. 3 failed on HubSpot's side; retrying sends only those.");
 });

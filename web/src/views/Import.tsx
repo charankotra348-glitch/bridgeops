@@ -13,6 +13,16 @@ const RECORD_TEXT: Record<string, string> = {
   rollback_conflict: "Changed in HubSpot since, left as is",
 };
 
+export function afterImport(written: number, failed: number, notImported: number): string {
+  const parts = [`${written} ${written === 1 ? "row is" : "rows are"} in HubSpot.`];
+  if (failed) parts.push(`${failed} failed on HubSpot's side; retrying sends only those.`);
+  if (notImported) {
+    parts.push(`${notImported} ${notImported === 1 ? "row was" : "rows were"} never sent because the data isn't valid. ` +
+      "Retrying won't change that: fix those rows in the file and upload it again.");
+  }
+  return parts.join(" ");
+}
+
 export function ImportView({ job, config, onChanged }: {
   job: Job;
   config: Config;
@@ -43,6 +53,9 @@ export function ImportView({ job, config, onChanged }: {
   const imported = ["executed", "executed_with_errors"].includes(job.status);
   const rolledBack = job.status === "rolled_back";
   const shown = records.filter((r) => filter === "all" || r.status === filter);
+  const failed = counts.failed ?? 0;          // HubSpot rejected or timed out: a retry can help
+  const notImported = counts.invalid ?? 0;    // never valid: only fixing the file helps
+  const written = (counts.created ?? 0) + (counts.updated ?? 0) + (counts.unchanged ?? 0);
 
   return (
     <section className="view">
@@ -51,7 +64,7 @@ export function ImportView({ job, config, onChanged }: {
         <p className="lede">
           {rolledBack && "Contacts this import created were archived and the ones it updated were put back, except any changed in HubSpot since."}
           {imported && job.status === "executed" && "Every row went where the preview said it would."}
-          {job.status === "executed_with_errors" && "Most rows went in. The ones below marked failed or not imported need fixing in the file; running the import again only retries those."}
+          {job.status === "executed_with_errors" && afterImport(written, failed, notImported)}
           {job.status === "mapped" && "Contacts are matched by email: existing ones are updated, the rest are created. You can roll the whole import back afterwards."}
         </p>
 
@@ -67,9 +80,9 @@ export function ImportView({ job, config, onChanged }: {
           <div className="view-actions">
             {confirming === null && (
               <>
-                {job.status !== "executed" && (
+                {(job.status === "mapped" || failed > 0) && (
                   <button className="btn btn-primary" onClick={() => setConfirming("import")}>
-                    {imported ? "Retry the rows that didn't import" : "Import into HubSpot"}
+                    {imported ? `Retry ${failed} failed ${failed === 1 ? "row" : "rows"}` : "Import into HubSpot"}
                   </button>
                 )}
                 {imported && <button className="btn btn-danger-quiet" onClick={() => setConfirming("rollback")}>Roll back this import</button>}
