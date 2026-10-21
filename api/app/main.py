@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app import migrate, models
@@ -15,8 +16,9 @@ from app.decisions import get_provider
 from app.dedupe import find_duplicates
 from app.execution import run as execution
 from app.hubspot import HubSpotClient, HubSpotError
+from app.mapping import rules
 from app.mapping.pipeline import plan_mappings
-from app.mapping.target_schema import BY_NAME, static_definitions
+from app.mapping.target_schema import BY_NAME, OPTION_DESCRIPTIONS, TARGET_PROPERTIES, static_definitions
 from app.profiling import ParseError, profile_file, read_rows
 from app.schemas import (
     DuplicateOut,
@@ -25,9 +27,11 @@ from app.schemas import (
     ImportRecordOut,
     JobCreate,
     JobOut,
+    JobSummaryOut,
     MappingOut,
     MappingUpdate,
     SourceOut,
+    TargetOut,
 )
 
 logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
@@ -46,6 +50,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="BridgeOps", version="0.1.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=get_settings().cors_origin_list(),
+                   allow_methods=["GET", "POST", "PATCH"], allow_headers=["content-type"])
 
 
 def audit(db: Session, action: str, obj_type: str, obj_id: str, before=None, after=None, actor="system"):
@@ -152,6 +158,32 @@ def create_job(body: JobCreate, db: Session = Depends(get_db)):
     return job
 
 
+@app.get("/jobs", response_model=list[JobSummaryOut])
+def list_jobs(limit: int = 50, db: Session = Depends(get_db)):
+    jobs = db.query(models.Job).order_by(models.Job.created_at.desc()).limit(min(limit, 200)).all()
+    return [JobSummaryOut(id=j.id, filename=j.source.filename, rows=j.source.row_count, provider=j.provider,
+                          status=j.status, created_at=j.created_at, counts=j.counts or {}) for j in jobs]
+
+
+@app.get("/targets", response_model=list[TargetOut])
+def list_targets():
+    """HubSpot contact properties a column can map to, with enum options, for review dropdowns."""
+    return [TargetOut(name=p.name, label=p.label, description=p.description, type=p.type,
+                      options=[{"value": o, "description": OPTION_DESCRIPTIONS.get(p.name, {}).get(o, "")}
+                               for o in p.options])
+            for p in TARGET_PROPERTIES]
+
+
+@app.get("/config")
+def client_config():
+    """What this deployment can do, so a client can enable or hide actions."""
+    s = get_settings()
+    providers = ["rules"] + [name for name, key in (("gemini", s.gemini_api_key), ("jev", s.typesafe_api_key))
+                             if key]
+    return {"hubspot_configured": bool(s.hubspot_token), "providers": providers,
+            "default_provider": s.decision_provider}
+
+
 @app.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(models.Job, job_id)
@@ -170,6 +202,27 @@ def review_queue(job_id: str, db: Session = Depends(get_db)):
             if m.status == "pending" or any(v["status"] == "pending" for v in m.value_map.values())]
 
 
+def _require_reviewable(job: models.Job) -> None:
+    if job.status != "mapped":
+        raise HTTPException(409, f"Job is {job.status}; review can only change before the import")
+
+
+def _value_map_for(mapping: models.Mapping, threshold: float) -> dict:
+    """Value map for a column a reviewer has just pointed at a new target. Enum targets get
+    every distinct source value mapped by the rules where they are sure, pending otherwise."""
+    if BY_NAME[mapping.target_property].type != "enum":
+        return {}
+    column = next((c for c in mapping.job.source.schema_json["columns"]
+                   if c["name"] == mapping.source_column), None)
+    values = (column or {}).get("value_counts") or {v: 1 for v in (column or {}).get("samples", [])}
+    out = {}
+    for value in values:
+        target, conf, _ = rules.map_enum_value(mapping.target_property, value)
+        out[value] = {"target": target, "confidence": conf, "method": "rule" if target else "none",
+                      "status": "auto" if target and conf >= threshold else "pending"}
+    return out
+
+
 @app.patch("/mappings/{mapping_id}", response_model=MappingOut)
 def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(get_db)):
     mapping = db.get(models.Mapping, mapping_id)
@@ -178,11 +231,14 @@ def update_mapping(mapping_id: str, body: MappingUpdate, db: Session = Depends(g
     if body.target_property is not None and body.target_property not in BY_NAME:
         raise HTTPException(422, f"Unknown target property {body.target_property!r}")
 
+    _require_reviewable(mapping.job)
+
     before = {"target_property": mapping.target_property, "status": mapping.status,
               "value_map": mapping.value_map}
     if body.status == "approved":
-        if body.target_property is not None:
+        if body.target_property is not None and body.target_property != mapping.target_property:
             mapping.target_property = body.target_property
+            mapping.value_map = _value_map_for(mapping, get_settings().normalize_threshold)
         mapping.method, mapping.confidence = "human", 1.0
     mapping.status = body.status
 
@@ -221,6 +277,7 @@ def review_duplicate(group_id: str, body: DuplicateUpdate, db: Session = Depends
     group = db.get(models.DuplicateGroup, group_id)
     if not group:
         raise HTTPException(404, "Duplicate group not found")
+    _require_reviewable(group.job)
     if body.status == "approved":
         if body.keep_row is None or body.keep_row not in group.rows:
             raise HTTPException(422, f"keep_row must be one of {group.rows}")

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_timeout_s: float = 30.0
 
+    cors_origins: str = "http://localhost:5173"   # comma-separated; the web UI's dev server
+
     hubspot_token: str = ""
     hubspot_base_url: str = "https://api.hubapi.com"
     hubspot_requests_per_10s: int = 90  # private apps on Free/Starter allow 100 per 10 s; keep headroom
@@ -30,6 +32,9 @@ class Settings(BaseSettings):
     mapping_threshold: float = 0.80
     normalize_threshold: float = 0.90
     duplicate_threshold: float = 0.85
+
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

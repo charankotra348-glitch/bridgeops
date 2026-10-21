@@ -10,3 +10,4 @@ data/uploads/
 eval/results/
 node_modules/
 dist/
+*.tsbuildinfo

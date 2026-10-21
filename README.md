@@ -4,7 +4,7 @@
 
 BridgeOps profiles an uploaded CSV/JSON export, maps its columns to HubSpot contact properties, normalizes values (e.g. `"Active-ish"` → `customer`), and gates every decision on confidence: confident decisions run automatically, uncertain ones go to a human review queue.
 
-> Status: **Week 3 of 5**: the full pipeline from upload to HubSpot import works through the API: rules-first mapping, value normalization, duplicate detection, human review, dry run, idempotent batched import with retries and rate limiting, and rollback. An eval harness benchmarks rules vs an LLM (Gemini) vs Jev. The web UI lands in Week 4.
+> Status: **Week 4 of 5**: the full pipeline from upload to HubSpot import works end to end, verified against a live HubSpot test account, with a review UI on top: rules-first mapping, value normalization, duplicate detection, human review, dry run, idempotent batched import with retries and rate limiting, and rollback. An eval harness benchmarks rules vs an LLM (Gemini) vs Jev.
 
 ## How it works
 
@@ -47,6 +47,14 @@ pip install -r requirements.txt -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
+Then the review UI, in a second terminal (Node 20+):
+
+```bash
+cd web
+npm install
+npm run dev                        # http://localhost:5173, talks to the API on :8000
+```
+
 The API applies Alembic migrations on startup (`AUTO_MIGRATE=true`). To run them separately: `cd api && python -m app.migrate`. After changing a model: `alembic revision --autogenerate -m "..."`; a test fails if models and migrations drift apart.
 
 Try it:
@@ -70,7 +78,18 @@ Create a free HubSpot developer **test** account and a private app in it with th
 python scripts/live_import_check.py
 ```
 
-It runs the whole flow on throwaway contacts (`bridgeops-check.*@example.com`): dry run, import, re-run (must write nothing), rollback. It confirms each step in HubSpot and cleans up after itself. Never point it at a production portal.
+Verified against a live HubSpot test account in October 2026: every check passed, including the lifecycle-stage restore on rollback. It runs the whole flow on throwaway contacts (`bridgeops-check.*@example.com`): dry run, import, re-run (must write nothing), rollback. It confirms each step in HubSpot and cleans up after itself. Never point it at a production portal.
+
+## Review UI
+
+`web/` is a React + TypeScript app that walks one export through four stages:
+
+1. **Upload**: drop the file and choose who makes the judgment calls (rules only, Gemini or Jev).
+2. **Review**: only what needs a person is shown. Each column appears as a crossing from the column in the file to the HubSpot field, with a bar for how sure the decision is and who made it. Unrecognized columns ask for a field rather than defaulting to skip. Enum columns show how each value translates. Possible duplicates are shown side by side with the differing fields highlighted, and the reviewer picks the row to keep.
+3. **Dry run**: per row, what the import would do and the exact fields it would send. Nothing is written.
+4. **Import**: imports with a confirmation step, shows each contact's HubSpot ID and the values it replaced, and offers rollback.
+
+The open job is in the URL (`#/jobs/<id>`), so a reload or a shared link reopens it. Tests (Vitest + Testing Library) cover the review logic and the review screen; CI typechecks, tests and builds it.
 
 ## API
 
@@ -88,6 +107,9 @@ It runs the whole flow on throwaway contacts (`bridgeops-check.*@example.com`): 
 | `POST` | `/jobs/{id}/execute` | Import into HubSpot. 409 with blockers while review is unfinished; safe to re-run (audited) |
 | `POST` | `/jobs/{id}/rollback` | Archive created contacts, restore updated ones, skip ones changed since (audited) |
 | `GET` | `/jobs/{id}/records` | What happened to each row (`?status=failed`), with the payload sent and the values it replaced |
+| `GET` | `/jobs` | Recent jobs with file name, row count, provider and status |
+| `GET` | `/targets` | HubSpot fields a column can map to, with enum options |
+| `GET` | `/config` | Which decision providers are configured and whether HubSpot is connected |
 | `GET` | `/healthz` | Liveness |
 
 ## Evaluation
@@ -153,7 +175,10 @@ api/
     execution/
       plan.py            reviewed decisions -> validated HubSpot records (pure, no network)
       run.py             dry run, idempotent import, rollback with conflict detection
-  tests/                 54 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+  tests/                 58 tests, incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+web/                     React review UI (Vite, TypeScript, Vitest)
+  src/review.ts          what still needs a person; which stage a job is in
+  src/views/             Upload, Review, DryRun, Import
 scripts/
   live_import_check.py   end-to-end check against a real HubSpot test account
 eval/                    labeled datasets, benchmark runner, threshold sweep, comparison report
@@ -164,7 +189,7 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [x] **Week 1**: upload, profiling, rules baseline, review API, audit log, eval harness, CI
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
-- [ ] **Week 4**: React UI (mapping editor, review queue, job progress), auth, observability
+- [ ] **Week 4**: React review UI ✅ (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), auth, observability
 - [ ] **Week 5**: final benchmark on held-out data, deployment, demo
 
 ## Known limits

@@ -114,3 +114,21 @@ class ImportRecordOut(BaseModel):
     payload: dict
     before: dict | None
     error: str
+
+
+class JobSummaryOut(BaseModel):
+    id: str
+    filename: str
+    rows: int
+    provider: str
+    status: str
+    created_at: datetime
+    counts: dict
+
+
+class TargetOut(BaseModel):
+    name: str
+    label: str
+    description: str
+    type: str
+    options: list[dict]             # [{"value", "description"}] for enum properties

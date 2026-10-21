@@ -125,3 +125,10 @@ def test_transient_hubspot_outage_returns_502_and_job_can_run_again(client, hubs
     assert client.get(f"/jobs/{job['id']}").json()["status"] == "mapped"
     hubspot.failures = []
     assert client.post(f"/jobs/{job['id']}/execute").status_code == 200
+
+
+def test_review_is_locked_after_the_import(client, hubspot):
+    job = make_job(client)
+    client.post(f"/jobs/{job['id']}/execute")
+    mapping_id = client.get(f"/jobs/{job['id']}").json()["mappings"][0]["id"]
+    assert client.patch(f"/mappings/{mapping_id}", json={"status": "rejected"}).status_code == 409

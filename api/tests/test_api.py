@@ -87,3 +87,36 @@ def test_duplicates_flagged_and_reviewed(client):
     assert r.status_code == 200, r.text
     assert r.json()["same_person"] is True and r.json()["method"] == "human" and r.json()["keep_row"] == 2
     assert client.patch("/duplicates/nope", json={"status": "rejected"}).status_code == 404
+
+
+def test_jobs_list_targets_and_config(client):
+    sid = upload(client).json()["id"]
+    job = client.post("/jobs", json={"source_id": sid}).json()
+    listed = client.get("/jobs").json()
+    assert listed[0]["id"] == job["id"] and listed[0]["filename"] == "export.csv" and listed[0]["rows"] == 5
+
+    targets = {t["name"]: t for t in client.get("/targets").json()}
+    assert "email" in targets and targets["email"]["options"] == []
+    stage_options = {o["value"] for o in targets["lifecyclestage"]["options"]}
+    assert {"lead", "customer", "other"} <= stage_options
+
+    cfg = client.get("/config").json()
+    assert cfg["providers"][0] == "rules" and "hubspot_configured" in cfg
+
+
+def test_retargeting_a_column_to_an_enum_builds_its_value_map(client):
+    csv = "Email,Phase\na@x.com,Customer\nb@x.com,kinda interested\n"
+    sid = upload(client, content=csv).json()["id"]
+    job = client.post("/jobs", json={"source_id": sid}).json()
+    phase = next(m for m in job["mappings"] if m["source_column"] == "Phase")
+    r = client.patch(f"/mappings/{phase['id']}", json={"status": "approved",
+                                                         "target_property": "lifecyclestage"})
+    vm = r.json()["value_map"]
+    assert vm["Customer"]["target"] == "customer" and vm["Customer"]["status"] == "auto"
+    assert vm["kinda interested"]["status"] == "pending" and vm["kinda interested"]["target"] is None
+
+
+def test_cors_allows_the_dev_ui(client):
+    r = client.options("/jobs", headers={"Origin": "http://localhost:5173",
+                                         "Access-Control-Request-Method": "GET"})
+    assert r.headers.get("access-control-allow-origin") == "http://localhost:5173"
