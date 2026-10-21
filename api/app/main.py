@@ -350,7 +350,8 @@ def _require(client: HubSpotClient | None) -> HubSpotClient:
 def _report_out(report: execution.Report, source: str) -> ExecutionReportOut:
     return ExecutionReportOut(dry_run=report.dry_run, blockers=report.blockers, counts=report.counts,
                               records=report.records, definitions=source,
-                              requests_sent=report.requests_sent, retries=report.retries)
+                              requests_sent=report.requests_sent, retries=report.retries,
+                              reasons=report.reasons)
 
 
 @app.post("/jobs/{job_id}/dry-run", response_model=ExecutionReportOut)

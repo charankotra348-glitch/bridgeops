@@ -102,6 +102,7 @@ class ExecutionReportOut(BaseModel):
     definitions: str                # "hubspot" (live) or "built-in"
     requests_sent: int
     retries: int
+    reasons: list[dict] = []        # dry run: why rows can't import, grouped, most common first
 
 
 class ImportRecordOut(BaseModel):

@@ -10,6 +10,21 @@ export const ACTION_TEXT: Record<string, string> = {
   invalid: "Won't import",
 };
 
+/** What to do about a rejection reason, in the reviewer's terms. */
+export function fixFor(reason: string): string {
+  if (reason.startsWith("no email")) {
+    return "No column is going into Email. Contacts are matched by email, so map the email column in Review.";
+  }
+  if (reason.startsWith("invalid email")) {
+    return "The column going into Email doesn't hold email addresses in these rows. Check in Review which column is mapped to Email.";
+  }
+  if (reason.includes("is not an option of")) return "Translate this value to one of HubSpot's options in Review, or leave it empty.";
+  if (reason.startsWith("HubSpot has no contact property")) return "Your HubSpot account doesn't have this field. Map the column somewhere else, or don't import it.";
+  if (reason.includes("read-only")) return "HubSpot won't let imports write this field. Don't import that column.";
+  if (reason.startsWith("same email as row")) return "These rows share an email but weren't marked as the same person. Only the first will import.";
+  return "Fix the column in Review, or correct the rows in the file and upload it again.";
+}
+
 export function DryRunView({ job, config, onBackToReview, onImport }: {
   job: Job;
   config: Config;
@@ -42,6 +57,17 @@ export function DryRunView({ job, config, onBackToReview, onImport }: {
           {sentence(c)} Nothing has been written to HubSpot yet.
           {report.definitions === "built-in" && " HubSpot isn't connected, so this preview checks against BridgeOps' own list of fields and can't tell new contacts from existing ones."}
         </p>
+        {report.reasons.length > 0 && (
+          <div className="banner banner-error reasons">
+            {report.reasons.map((r) => (
+              <div key={r.reason}>
+                <p><strong>{r.rows} {r.rows === 1 ? "row" : "rows"}:</strong> {r.example}{r.rows > 1 && <span className="hint"> (row {r.first_row + 1} and others)</span>}</p>
+                <p className="fix">{fixFor(r.reason)}</p>
+              </div>
+            ))}
+            <button className="btn" onClick={onBackToReview}>Back to review</button>
+          </div>
+        )}
         {report.blockers.length > 0 ? (
           <div className="banner banner-needs">
             <p>Finish the review before importing:</p>

@@ -97,6 +97,7 @@ export interface Report {
   definitions: string;
   requests_sent: number;
   retries: number;
+  reasons: { reason: string; rows: number; example: string; first_row: number }[];
 }
 
 export interface ImportRecord {

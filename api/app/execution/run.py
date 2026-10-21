@@ -22,6 +22,7 @@ Rollback:
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -51,6 +52,24 @@ class Report:
     records: list[dict] = field(default_factory=list)
     requests_sent: int = 0
     retries: int = 0
+    reasons: list[dict] = field(default_factory=list)   # why rows can't import, most common first
+
+
+_QUOTED = re.compile(r"'[^']*'")
+
+
+def summarize_reasons(plan: Plan, top: int = 5) -> list[dict]:
+    """Group invalid rows by error, ignoring the specific value in quotes, so one cause
+    behind many rows ("invalid email ...") shows up once with its row count."""
+    groups: dict[str, dict] = {}
+    for r in plan.records:
+        if r.status != "invalid":
+            continue
+        for err in r.errors:
+            key = _QUOTED.sub("'…'", err)
+            g = groups.setdefault(key, {"reason": key, "rows": 0, "example": err, "first_row": r.row})
+            g["rows"] += 1
+    return sorted(groups.values(), key=lambda g: -g["rows"])[:top]
 
 
 def payload_hash(props: dict) -> str:
@@ -97,7 +116,8 @@ def dry_run(job: models.Job, rows: list[dict], definitions: dict, client: HubSpo
                     "errors": r.errors, "merged_rows": r.merged_rows, "merged_into": r.merged_into})
     counts.pop("ready", None)
     return Report(True, plan.blockers, counts, out[:sample],
-                  client.requests_sent if client else 0, client.retries if client else 0)
+                  client.requests_sent if client else 0, client.retries if client else 0,
+                  summarize_reasons(plan))
 
 
 # --------------------------------------------------------------------------- import

@@ -132,3 +132,16 @@ def test_review_is_locked_after_the_import(client, hubspot):
     client.post(f"/jobs/{job['id']}/execute")
     mapping_id = client.get(f"/jobs/{job['id']}").json()["mappings"][0]["id"]
     assert client.patch(f"/mappings/{mapping_id}", json={"status": "rejected"}).status_code == 409
+
+
+def test_dry_run_groups_why_rows_cannot_import(client):
+    csv = "Email,First Name\n" + "".join(f"bad-{i},N{i}\n" for i in range(60)) + "ok@x.com,Ok\n"
+    sid = client.post("/sources", files={"file": ("e.csv", csv.encode(), "text/csv")}).json()["id"]
+    job = client.post("/jobs", json={"source_id": sid}).json()
+    email = next(m for m in job["mappings"] if m["source_column"] == "Email")
+    client.patch(f"/mappings/{email['id']}", json={"status": "approved", "target_property": "email"})
+
+    r = client.post(f"/jobs/{job['id']}/dry-run").json()
+    assert r["counts"]["invalid"] == 60
+    (top,) = r["reasons"]
+    assert top["reason"] == "invalid email '…'" and top["rows"] == 60   # counted across all rows, not just 50

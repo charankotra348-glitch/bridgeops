@@ -1,4 +1,5 @@
 import type { DuplicateGroup, Job, Mapping } from "./api";
+import { fixFor } from "./views/DryRun";
 import { decidedBy, needsReview, outstanding, pendingValues, stageOf } from "./review";
 
 const mapping = (over: Partial<Mapping> = {}): Mapping => ({
@@ -41,4 +42,10 @@ test("decisions are attributed in plain words", () => {
   expect(decidedBy("human")).toBe("You");
   expect(decidedBy("gemini")).toBe("Gemini");
   expect(decidedBy("none")).toBe("Nobody yet");
+});
+
+test("each rejection reason comes with a fix", () => {
+  expect(fixFor("no email: the import upserts by email, so every record needs one")).toMatch(/map the email column/);
+  expect(fixFor("invalid email '…'")).toMatch(/doesn't hold email addresses/);
+  expect(fixFor("'…' is not an option of '…' in this HubSpot account")).toMatch(/Translate this value/);
 });
