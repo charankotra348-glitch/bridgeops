@@ -70,7 +70,7 @@ Create a free HubSpot developer **test** account and a private app in it with th
 python scripts/live_import_check.py
 ```
 
-It runs the whole flow on throwaway contacts (`@bridgeops-check.example`): dry run, import, re-run (must write nothing), rollback. It confirms each step in HubSpot and cleans up after itself. Never point it at a production portal.
+It runs the whole flow on throwaway contacts (`bridgeops-check.*@example.com`): dry run, import, re-run (must write nothing), rollback. It confirms each step in HubSpot and cleans up after itself. Never point it at a production portal.
 
 ## API
 

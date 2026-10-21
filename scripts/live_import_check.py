@@ -4,8 +4,9 @@ Runs the whole BridgeOps flow in-process on a throwaway SQLite database:
 upload -> map -> dry run -> import -> re-run (must write nothing) -> rollback,
 then confirms in HubSpot that every step did what it reported.
 
-It only touches contacts with emails ending @bridgeops-check.example, and the
-rollback at the end archives every contact it created.
+It only touches contacts with emails like bridgeops-check.<name>.<run>@example.com
+(example.com is reserved for testing and accepted by HubSpot), and the rollback at
+the end archives every contact it created.
 
     cp .env.example .env              # set HUBSPOT_TOKEN (test account private app token)
     python scripts/live_import_check.py
@@ -13,6 +14,7 @@ rollback at the end archives every contact it created.
 Use a developer TEST account, never a production portal.
 """
 
+import logging
 import os
 import sys
 import tempfile
@@ -34,12 +36,15 @@ from app.config import get_settings  # noqa: E402
 from app.hubspot import HubSpotClient  # noqa: E402
 from app.main import app  # noqa: E402
 
+logging.getLogger().setLevel(logging.WARNING)       # keep the output to the checks
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 RUN = uuid.uuid4().hex[:6]
-DOMAIN = "bridgeops-check.example"
+PREFIX = "bridgeops-check"
 
 
 def email(name: str) -> str:
-    return f"{name}.{RUN}@{DOMAIN}"
+    return f"{PREFIX}.{name}.{RUN}@example.com"
 
 
 def check(ok: bool, what: str) -> None:
@@ -55,8 +60,13 @@ def main() -> None:
     hs = HubSpotClient(settings.hubspot_token, settings.hubspot_base_url)
 
     print(f"Run {RUN}: seeding one existing contact")
-    hs.upsert_by_email({email("existing"): {"firstname": "Existing", "lastname": "Contact",
-                                            "lifecyclestage": "lead"}})
+    seeded = hs.upsert_by_email({email("existing"): {"firstname": "Existing", "lastname": "Contact",
+                                                     "lifecyclestage": "lead"}})
+    if seeded.failed:
+        sys.exit(f"  FAIL  HubSpot rejected the seed contact: {seeded.failed}\n"
+                 "        Check the token's scopes (crm.objects.contacts.read/write, "
+                 "crm.schemas.contacts.read) and that this is a test account.")
+    check(email("existing") in seeded.created or email("existing") in seeded.updated, "seed contact exists")
 
     csv = (
         "Email,First Name,Last Name,Company,Lifecycle Stage\n"
@@ -78,6 +88,8 @@ def main() -> None:
         print("\nDry run")
         dry = c.post(f"/jobs/{jid}/dry-run").json()
         print(f"  {dry['counts']}  (definitions: {dry['definitions']})")
+        for rec in dry["records"]:
+            print(f"    row {rec['row']}: {rec['action']:<22} {rec['email']} {rec['errors'] or ''}")
         check(dry["definitions"] == "hubspot", "validated against live HubSpot property definitions")
         check(dry["counts"].get("would_create") == 2 and dry["counts"].get("would_update") == 1,
               "2 to create, 1 to update")
@@ -86,8 +98,12 @@ def main() -> None:
         print("\nImport")
         t = time.perf_counter()
         r = c.post(f"/jobs/{jid}/execute").json()
+        if "counts" not in r:
+            sys.exit(f"  FAIL  import request failed: {r}")
         print(f"  {r['counts']}  ({time.perf_counter() - t:.1f} s, {r['requests_sent']} requests, "
               f"{r['retries']} retries)")
+        for rec in c.get(f"/jobs/{jid}/records?status=failed").json():
+            print(f"    row {rec['row']} failed: {rec['error']}")
         check(r["counts"].get("created") == 2 and r["counts"].get("updated") == 1, "2 created, 1 updated")
         check(r["counts"].get("merged") == 1 and r["counts"].get("invalid") == 1,
               "duplicate merged, bad email not sent")

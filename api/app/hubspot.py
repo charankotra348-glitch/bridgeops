@@ -150,7 +150,8 @@ class HubSpotClient:
         return result
 
     def _upsert_chunk(self, emails: list[str], records: dict[str, dict], result: UpsertResult) -> None:
-        inputs = [{"id": e, "idProperty": "email", "properties": records[e]} for e in emails]
+        # email is sent in properties too: HubSpot does not allow partial upserts keyed by email
+        inputs = [{"id": e, "idProperty": "email", "properties": {**records[e], "email": e}} for e in emails]
         try:
             data = self.request("POST", f"{CONTACTS}/batch/upsert", json={"inputs": inputs})
         except HubSpotError as exc:
