@@ -22,9 +22,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_timeout_s: float = 30.0
 
-    # Auto-accept thresholds (tuned later on the eval set)
+    # Auto-accept thresholds. Values moved 0.85 -> 0.90 after the Gemini sweep (see README)
     mapping_threshold: float = 0.80
-    normalize_threshold: float = 0.85
+    normalize_threshold: float = 0.90
     duplicate_threshold: float = 0.85
 
 

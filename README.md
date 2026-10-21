@@ -22,7 +22,7 @@ upload ─▶ Profile ─▶ Map ─▶ Normalize ─▶ Dedupe ─▶ Validate*
 - **Rules first.** Deterministic rules (synonyms, abbreviations, value patterns, type checks) handle what they are sure of. A Y/N column named `email_opt_in` is *not* mapped to `email`, because its values don't look like emails.
 - **Models only for judgment calls.** Whatever the rules leave open goes to a `DecisionProvider`. The pipeline never calls a model directly, so Jev, an LLM (Gemini), or "abstain and ask a human" is a config switch (`DECISION_PROVIDER=jev|gemini|rules`).
 - **Duplicates the same way.** Same email (any case) or same phone + last name is a certain duplicate. Rows that only share a name, or a last name and company, become a yes/no "same person?" question for the decision model. Detection only flags; nothing is merged without review.
-- **Confidence gating.** Each decision is auto-accepted only above its threshold (0.80 for mappings, 0.85 for values and duplicates to start; tuned on the eval set).
+- **Confidence gating.** Each decision is auto-accepted only above its threshold: 0.80 for mappings, 0.90 for values, 0.85 for duplicates. Values were raised from 0.85 after the Gemini sweep (below).
 - **Measured, not guessed.** Every model request records its latency and the token counts the provider reported. Missing counts stay missing, and cost is always labeled an estimate.
 - **Fail safe.** If the model times out, errors, or answers outside the offered options, the decision abstains and goes to review. It is never auto-accepted.
 
@@ -84,16 +84,27 @@ python eval/compare.py                              # side-by-side table of ever
 - Each run also reports model requests, mean request latency, reported tokens and an estimated cost (`eval/prices.json`).
 - `--sweep` re-scores every threshold from 0.50 to 0.95 and reports the setting with the most coverage at ≥98% precision. Providers cache answers, so the sweep sends no extra requests. Thresholds picked this way are tuned on the data they are scored on; the held-out benchmark in Week 5 checks them.
 
-Current results (rules-only baseline, 77 decisions):
+### Results (77 decisions, October 2026)
 
-| | Decisions | Auto-accepted | Coverage | Precision |
-| --- | --- | --- | --- | --- |
-| Column mapping | 47 | 34 | 72.3% | 100% |
-| Value normalization | 20 | 9 | 45.0% | 100% |
-| Duplicate pairs | 10 | 3 | 30.0% | 100% |
-| **All** | **77** | **46** | **59.7%** | **100%** |
+Coverage / precision of auto-accepted decisions:
 
-The rules never guess, so precision is perfect and the remaining 40% goes to a human. The goal for the decision layer is to **raise coverage without dropping precision**. Gemini and Jev results get added here once they are run with real keys. CI fails the build if auto-accept precision falls below 95%.
+| Provider | Column mapping (47) | Value normalization (20) | Duplicate pairs (10) | **All (77)** | Wrong auto-accepts | Model requests | Cost per run |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Rules only | 72.3% / 100% | 45.0% / 100% | 30.0% / 100% | **59.7% / 100%** | 0 | 0 | — |
+| Rules + Gemini 3.5 Flash-Lite | 100% / 100% | 70.0% / 100% | 80.0% / 100% | **89.6% / 100%** | 0 | 9 (855 ms mean) | ~$0.005 (est.) |
+| Rules + Jev | — | — | — | — | — | — | waiting on API key |
+
+Gemini runs measured at thresholds 0.80 / 0.85 / 0.85. The sweep gives identical coverage and precision with values at 0.90, which is now the default. Gemini used 8,702 input and 1,063 output tokens across 31 questions.
+
+What the numbers do and don't show:
+
+- **The LLM raises coverage by 30 points without a wrong auto-accept** on this set. The rules alone never guess, so their 100% precision comes from sending 40% of decisions to a human.
+- **The margin is thin.** Gemini's two wrong answers ("Working - Contacted" → opportunity, "Hot" → lead) were both rated 0.80 confidence. They went to review only because the value threshold was above 0.80, which is why it is now 0.90.
+- **Self-reported confidence is coarse.** Most of Gemini's uncertain answers are exactly 0.80. A provider with calibrated probabilities (the case for Jev) should separate right from wrong answers more cleanly. The Jev run tests that.
+- **The duplicate sweep's 0.70 was not adopted.** It comes from 10 pairs, and a different-people pair sits exactly at 0.70.
+- **Small sample.** 0 errors in 69 auto-accepts bounds true precision at roughly ≥96% (95% confidence, rule of three). Lifecycle labels such as "Hot" or "hot prospect" are judgment calls. The held-out benchmark in Week 5 is the real test.
+
+CI fails the build if rules-only auto-accept precision falls below 95%.
 
 ## Project layout
 

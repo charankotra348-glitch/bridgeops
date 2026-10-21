@@ -86,7 +86,7 @@ def value_question(column: str, target: str, value: str) -> Question:
 
 
 def plan_mappings(profile: dict, provider: DecisionProvider, mapping_threshold: float = 0.80,
-                  normalize_threshold: float = 0.85) -> MappingPlan:
+                  normalize_threshold: float = 0.90) -> MappingPlan:
     columns = profile["columns"]
     by_name = {c["name"]: c for c in columns}
 
