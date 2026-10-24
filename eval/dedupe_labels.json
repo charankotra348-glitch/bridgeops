@@ -1,5 +1,5 @@
 {
-  "_comment": "Duplicate-detection labels. Rows are 0-based data rows (header excluded). same_person lists every group of rows that are one real person; any other pair is different people. columns is the true column mapping, so this scores dedupe alone, not mapping errors. DRAFT: written by Claude, to be checked by a human before results are reported.",
+  "_comment": "Duplicate-detection labels. Rows are 0-based data rows (header excluded). same_person lists every group of rows that are one real person; any other pair is different people. columns is the true column mapping, so this scores dedupe alone, not mapping errors. DRAFT: to be checked by hand before results are reported.",
   "contacts_with_duplicates.csv": {
     "columns": {
       "Email": "email", "First Name": "firstname", "Last Name": "lastname", "Phone": "phone",
