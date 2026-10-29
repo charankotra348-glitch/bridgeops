@@ -5,6 +5,7 @@
     python eval/run_eval.py --provider jev            # needs TYPESAFE_API_KEY
     python eval/run_eval.py --provider gemini --sweep # also sweep auto-accept thresholds
     python eval/run_eval.py --provider rules --min-precision 0.95   # CI gate
+    python eval/run_eval.py --provider gemini --set heldout          # held-out benchmark
 
 For every decision (column mapping, enum value, or duplicate pair) it records whether the
 pipeline auto-accepted it and whether the answer matches the label.
@@ -19,6 +20,10 @@ eval/prices.json and is left empty when tokens were not reported.
 The sweep re-runs the pipeline at each threshold pair. Providers cache answers by
 input, so the sweep sends no extra requests. Thresholds picked on this set are
 tuned on the same data they are scored on; the held-out benchmark checks them.
+
+--set heldout scores eval/heldout/ instead: exports in naming styles the tuning set
+doesn't have, labeled before any run. It uses the configured thresholds as they are and
+refuses --sweep, since tuning on held-out data would make it one more tuning set.
 """
 
 import argparse
@@ -41,8 +46,11 @@ from app.profiling import profile_file, read_rows  # noqa: E402
 SWEEP = [round(0.50 + 0.05 * i, 2) for i in range(10)]  # 0.50 .. 0.95
 
 
-def load_profiles(labels: dict) -> dict[str, dict]:
-    return {name: profile_file((ROOT / "datasets" / name).read_bytes(), name).to_dict()
+SETS = {"tuning": ROOT, "heldout": ROOT / "heldout"}
+
+
+def load_profiles(labels: dict, base: Path = ROOT) -> dict[str, dict]:
+    return {name: profile_file((base / "datasets" / name).read_bytes(), name).to_dict()
             for name in labels if not name.startswith("_")}
 
 
@@ -74,9 +82,9 @@ def score(labels: dict, profiles: dict, provider, mapping_threshold: float,
     return rows
 
 
-def load_dedupe() -> tuple[dict, dict[str, list[dict]]]:
-    labels = json.loads((ROOT / "dedupe_labels.json").read_text())
-    data = {name: read_rows((ROOT / "datasets" / "dedupe" / name).read_bytes(), name)[1]
+def load_dedupe(base: Path = ROOT) -> tuple[dict, dict[str, list[dict]]]:
+    labels = json.loads((base / "dedupe_labels.json").read_text())
+    data = {name: read_rows((base / "datasets" / "dedupe" / name).read_bytes(), name)[1]
             for name in labels if not name.startswith("_")}
     return labels, data
 
@@ -187,18 +195,23 @@ def main():
     ap.add_argument("--sweep", action="store_true", help="sweep both thresholds (no extra requests)")
     ap.add_argument("--sweep-precision", type=float, default=0.98,
                     help="precision the sweep must keep when picking thresholds")
+    ap.add_argument("--set", dest="eval_set", default="tuning", choices=list(SETS),
+                    help="tuning (default) or heldout")
     ap.add_argument("--out", default=str(ROOT / "results"))
     args = ap.parse_args()
+    if args.eval_set == "heldout" and args.sweep:
+        ap.error("--sweep is not allowed on the held-out set: thresholds are chosen on the tuning set only")
+    base = SETS[args.eval_set]
 
     settings = get_settings()
     mt = args.mapping_threshold if args.mapping_threshold is not None else settings.mapping_threshold
     nt = args.normalize_threshold if args.normalize_threshold is not None else settings.normalize_threshold
     dt = args.duplicate_threshold if args.duplicate_threshold is not None else settings.duplicate_threshold
 
-    labels = json.loads((ROOT / "labels.json").read_text())
+    labels = json.loads((base / "labels.json").read_text())
     prices = json.loads((ROOT / "prices.json").read_text())
-    profiles = load_profiles(labels)
-    dlabels, ddata = load_dedupe()
+    profiles = load_profiles(labels, base)
+    dlabels, ddata = load_dedupe(base)
     provider = get_provider(settings, args.provider)
 
     start = time.perf_counter()
@@ -207,7 +220,7 @@ def main():
     summary = summarize(rows)
     usage = usage_summary(provider.usage, prices)
 
-    print(f"Provider: {provider.name}   thresholds: mapping {mt:.2f}, values {nt:.2f}, "
+    print(f"Set: {args.eval_set}   Provider: {provider.name}   thresholds: mapping {mt:.2f}, values {nt:.2f}, "
           f"duplicates {dt:.2f}   ({elapsed} s)\n")
     print(f"{'':10} {'decisions':>9} {'auto':>6} {'coverage':>9} {'precision':>10}")
     for name in ("mapping", "value", "duplicate", "all"):
@@ -239,7 +252,7 @@ def main():
         got = f", model said {r['got']} @ {r['confidence']:.2f}" if modeled else ""
         print(f"  [{r['dataset']}] {r['item']}  (expected {r['expected']}{got})")
 
-    result = {"provider": provider.name, "model": getattr(provider, "model", None), "elapsed_s": elapsed,
+    result = {"set": args.eval_set, "provider": provider.name, "model": getattr(provider, "model", None), "elapsed_s": elapsed,
               "thresholds": {"mapping": mt, "normalize": nt, "duplicate": dt}, "summary": summary,
               "usage": usage, "calls": [asdict(u) for u in provider.usage], "rows": rows}
 
@@ -263,7 +276,8 @@ def main():
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    path = out / f"eval_{provider.name}.json"
+    prefix = "eval" if args.eval_set == "tuning" else args.eval_set
+    path = out / f"{prefix}_{provider.name}.json"
     path.write_text(json.dumps(result, indent=2))
     print(f"\nSaved {path}")
 

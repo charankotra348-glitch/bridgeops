@@ -1,0 +1,10 @@
+{
+  "_comment": "Held-out duplicate labels, written before any run. Rows are 0-based data rows (header excluded). same_person lists every group of rows that are one real person; any other pair is different people. Planted: case-changed email (0+1), nickname with personal email (2+3), reformatted phone with another work email (6+7), surname typo (10+11), nickname with same phone (14+15). Look-alikes that are different people: same name at another company (4+5, 12+13 'Sam'/'Samantha'), a shared office line (8+9).",
+  "attendees_with_duplicates.csv": {
+    "columns": {
+      "Email": "email", "First Name": "firstname", "Last Name": "lastname", "Phone": "phone",
+      "Company": "company", "Title": "jobtitle", "City": "city"
+    },
+    "same_person": [[0, 1], [2, 3], [6, 7], [10, 11], [14, 15]]
+  }
+}

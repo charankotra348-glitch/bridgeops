@@ -1,0 +1,56 @@
+{
+  "_comment": "Held-out labels, written before any provider was run on these files. Same format as eval/labels.json. Not used for tuning: never pick thresholds or change rules or prompts from these results.",
+  "zoho_style.csv": {
+    "columns": {
+      "Contact Owner": "none", "Salutation": "none", "First Name": "firstname", "Last Name": "lastname",
+      "Email": "email", "Secondary Email": "none", "Phone": "phone", "Mobile": "mobilephone",
+      "Account Name": "company", "Designation": "jobtitle", "Mailing Street": "address",
+      "Mailing City": "city", "Mailing State": "state", "Mailing Zip": "zip", "Mailing Country": "country",
+      "Lead Source": "none", "Contact Status": "lifecyclestage"
+    },
+    "values": {
+      "Contact Status": {
+        "Not Contacted": "lead", "Contacted": "lead", "Qualified": "salesqualifiedlead",
+        "Negotiation": "opportunity", "Customer": "customer", "Lost": "other"
+      }
+    }
+  },
+  "event_signups.csv": {
+    "columns": {
+      "Registrant Email": "email", "Given Name": "firstname", "Surname": "lastname", "Org": "company",
+      "Position Held": "jobtitle", "Tel": "phone", "Country/Region": "country", "Ticket Type": "none",
+      "Registered At": "none", "Relationship": "lifecyclestage"
+    },
+    "values": {
+      "Relationship": {
+        "Existing customer": "customer", "Prospect - demo booked": "opportunity",
+        "Newsletter subscriber": "subscriber", "First-time attendee": "lead",
+        "Former customer": "other", "Brand ambassador": "evangelist"
+      }
+    }
+  },
+  "pipedrive_people.json": {
+    "columns": {
+      "id": "none", "nameGiven": "firstname", "nameFamily": "lastname", "emailPrimary": "email",
+      "phoneOffice": "phone", "phoneCell": "mobilephone", "orgName": "company", "roleTitle": "jobtitle",
+      "homepage": "website", "postalCode": "zip", "pipelineStage": "lifecyclestage",
+      "ownerUserId": "none", "createdAt": "none"
+    },
+    "values": {
+      "pipelineStage": {
+        "Lead In": "lead", "Qualified": "salesqualifiedlead", "Proposal Made": "opportunity",
+        "Won": "customer", "Lost": "other"
+      }
+    }
+  },
+  "legacy_erp.csv": {
+    "columns": {
+      "CUST_NO": "none", "CONTACT_FNAME": "firstname", "CONTACT_LNAME": "lastname", "EMAIL_ADDR": "email",
+      "TEL_1": "phone", "COMPANY_NM": "company", "STREET_1": "address", "CITY_NM": "city",
+      "PROV_CD": "state", "POSTAL_CD": "zip", "CNTRY_CD": "country", "CUST_STAT": "lifecyclestage"
+    },
+    "values": {
+      "CUST_STAT": {"ACTV": "customer", "PROSP": "opportunity", "INACT": "other", "SUBS": "subscriber"}
+    }
+  }
+}

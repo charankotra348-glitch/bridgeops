@@ -1,0 +1,9 @@
+{
+  "data": [
+    {"id": 9001, "nameGiven": "Elena", "nameFamily": "Petrova", "emailPrimary": "elena.petrova@kvant.io", "phoneOffice": "+7 495 555 0101", "phoneCell": "+7 916 555 0102", "orgName": "Kvant", "roleTitle": "Head of Data", "homepage": "https://kvant.io", "postalCode": "101000", "pipelineStage": "Qualified", "ownerUserId": 17, "createdAt": "2026-06-11T09:00:00Z"},
+    {"id": 9002, "nameGiven": "Marcus", "nameFamily": "Johnson", "emailPrimary": "marcus@trailhead.dev", "phoneOffice": "+1 303-555-0150", "phoneCell": "", "orgName": "Trailhead Dev", "roleTitle": "Founder", "homepage": "trailhead.dev", "postalCode": "80202", "pipelineStage": "Proposal Made", "ownerUserId": 17, "createdAt": "2026-06-14T15:20:00Z"},
+    {"id": 9003, "nameGiven": "Priyanka", "nameFamily": "Das", "emailPrimary": "priyanka.das@mintleaf.in", "phoneOffice": "+91 80 5555 0100", "phoneCell": "+91 98 5555 0101", "orgName": "Mintleaf", "roleTitle": "VP Engineering", "homepage": "https://mintleaf.in", "postalCode": "560001", "pipelineStage": "Won", "ownerUserId": 22, "createdAt": "2026-07-01T07:45:00Z"},
+    {"id": 9004, "nameGiven": "Jonas", "nameFamily": "Schmidt", "emailPrimary": "j.schmidt@baukraft.de", "phoneOffice": "+49 30 5555 0100", "phoneCell": "", "orgName": "Baukraft GmbH", "roleTitle": "IT Manager", "homepage": "www.baukraft.de", "postalCode": "10115", "pipelineStage": "Lost", "ownerUserId": 22, "createdAt": "2026-07-09T12:10:00Z"},
+    {"id": 9005, "nameGiven": "Chloe", "nameFamily": "Nguyen", "emailPrimary": "chloe.nguyen@saltwave.au", "phoneOffice": "+61 2 5555 0100", "phoneCell": "+61 412 555 010", "orgName": "Saltwave", "roleTitle": "Operations Lead", "homepage": "https://saltwave.au", "postalCode": "2000", "pipelineStage": "Lead In", "ownerUserId": 17, "createdAt": "2026-07-21T04:30:00Z"}
+  ]
+}

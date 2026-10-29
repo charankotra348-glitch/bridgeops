@@ -2,8 +2,9 @@
 
     python eval/compare.py                      # prints markdown
     python eval/compare.py --write eval/results/comparison.md
+    python eval/compare.py --set heldout        # the held-out benchmark
 
-Reads eval/results/eval_<provider>.json, written by run_eval.py.
+Reads eval/results/eval_<provider>.json (or heldout_<provider>.json), written by run_eval.py.
 """
 
 import argparse
@@ -18,9 +19,9 @@ def pct(x: float) -> str:
     return f"{x:.1%}"
 
 
-def build(results_dir: Path) -> str:
+def build(results_dir: Path, prefix: str = "eval") -> str:
     runs = {}
-    for path in results_dir.glob("eval_*.json"):
+    for path in results_dir.glob(f"{prefix}_*.json"):
         data = json.loads(path.read_text())
         runs[data["provider"]] = data
     if not runs:
@@ -68,8 +69,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default=str(ROOT / "results"))
     ap.add_argument("--write", default=None)
+    ap.add_argument("--set", dest="eval_set", default="tuning", choices=["tuning", "heldout"])
     args = ap.parse_args()
-    report = build(Path(args.results))
+    report = build(Path(args.results), "eval" if args.eval_set == "tuning" else "heldout")
     print(report)
     if args.write:
         Path(args.write).write_text(report)

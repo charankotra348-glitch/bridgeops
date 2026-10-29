@@ -1,0 +1,7 @@
+CUST_NO;CONTACT_FNAME;CONTACT_LNAME;EMAIL_ADDR;TEL_1;COMPANY_NM;STREET_1;CITY_NM;PROV_CD;POSTAL_CD;CNTRY_CD;CUST_STAT
+100231;Robert;Tremblay;rtremblay@maplerock.ca;514-555-0100;Maple Rock Inc;1200 Rue Peel;Montreal;QC;H3B 2T6;CA;ACTV
+100232;Fatima;Zahra;fzahra@atlasmed.ma;+212 522 555 010;Atlas Med;12 Bd Zerktouni;Casablanca;CS;20000;MA;PROSP
+100233;Owen;Hughes;owen.hughes@cymru-energy.co.uk;029 5555 0101;Cymru Energy;3 Bute Pl;Cardiff;WLS;CF10 5AL;GB;INACT
+100234;Ana;Silva;ana.silva@verdeagro.com.br;+55 11 5555 0102;Verde Agro;Av Paulista 900;Sao Paulo;SP;01310-100;BR;ACTV
+100235;Daniel;Cohen;dcohen@negevsoft.co.il;+972 3 555 0103;Negev Soft;Rothschild 22;Tel Aviv;TA;6688218;IL;SUBS
+100236;Ingrid;Larsen;ingrid@nordlys.dk;+45 33 55 50 10;Nordlys ApS;Stroget 5;Copenhagen;84;1160;DK;PROSP

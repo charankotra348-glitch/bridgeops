@@ -4,7 +4,7 @@
 
 BridgeOps profiles an uploaded CSV/JSON export, maps its columns to HubSpot contact properties, normalizes values (e.g. `"Active-ish"` → `customer`), and gates every decision on confidence: confident decisions run automatically, uncertain ones go to a human review queue.
 
-> Status: **Week 4 of 5**: the full pipeline from upload to HubSpot import works end to end, verified against a live HubSpot test account, with a review UI on top: rules-first mapping, value normalization, duplicate detection, human review, dry run, idempotent batched import with retries and rate limiting, and rollback. An eval harness benchmarks rules vs an LLM (Gemini) vs Jev.
+> Status: **Week 5 of 5**: the full pipeline from upload to HubSpot import works end to end, verified against a live HubSpot test account, with a review UI on top: rules-first mapping, value normalization, duplicate detection, human review, dry run, idempotent batched import with retries and rate limiting, and rollback. An eval harness benchmarks rules vs an LLM (Gemini), and a held-out benchmark checks the chosen thresholds on export styles they weren't tuned on.
 
 ## How it works
 
@@ -178,7 +178,32 @@ What the numbers do and don't show:
 - **The margin is thin.** Gemini's two wrong answers ("Working - Contacted" → opportunity, "Hot" → lead) were both rated 0.80 confidence. They went to review only because the value threshold was above 0.80, which is why it is now 0.90.
 - **Self-reported confidence is coarse.** Most of Gemini's uncertain answers are exactly 0.80. A provider with calibrated probabilities (the case for Jev) should separate right from wrong answers more cleanly. The Jev run tests that.
 - **The duplicate sweep's 0.70 was not adopted.** It comes from 10 pairs, and a different-people pair sits exactly at 0.70.
-- **Small sample.** 0 errors in 69 auto-accepts bounds true precision at roughly ≥96% (95% confidence, rule of three). Lifecycle labels such as "Hot" or "hot prospect" are judgment calls. The held-out benchmark in Week 5 is the real test.
+- **Small sample.** 0 errors in 69 auto-accepts bounds true precision at roughly ≥96% (95% confidence, rule of three). Lifecycle labels such as "Hot" or "hot prospect" are judgment calls. The held-out benchmark below is the real test.
+
+### Held-out benchmark
+
+The thresholds above were picked on the same data they were scored on. `eval/heldout/` checks them on data they've never seen: four exports in naming styles the tuning set doesn't have (Zoho-style, an event sign-up sheet, a camelCase API export as JSON, a semicolon-delimited ERP dump with codes like `CUST_STAT=PROSP`) and a second duplicate list. The labels were written before any provider ran on these files.
+
+```bash
+python eval/run_eval.py --provider rules --set heldout
+python eval/run_eval.py --provider gemini --set heldout   # needs GEMINI_API_KEY
+python eval/compare.py --set heldout
+```
+
+`--set heldout` uses the configured thresholds as they are and refuses `--sweep`: picking thresholds here would turn it into one more tuning set.
+
+| Provider | Column mapping (52) | Value normalization | Duplicate pairs (7) | **All** | Wrong auto-accepts |
+| --- | --- | --- | --- | --- | --- |
+| Rules only | 59.6% / 100% | 83.3% / 100% (6) | 85.7% / 66.7% | **64.6% / 95.2%** (65) | 2 |
+| Rules + Gemini 3.5 Flash-Lite | not run yet | | | | |
+
+Coverage / precision of auto-accepted decisions, thresholds 0.80 / 0.90 / 0.85. Values are scored only for enum columns that got mapped, so the count depends on the provider.
+
+What the rules-only run found:
+
+- **Column mapping held up: no wrong auto-accept in 52 columns.** Coverage dropped from 72% to 60% because the new styles (`nameGiven`, `PROV_CD`, `Relationship`) aren't in the synonym lists, and those went to review instead of being guessed.
+- **Duplicate detection made both wrong calls.** It merged two different people who share an office phone line (Laura and Michael Bennett at the same firm), and it missed a surname typo (Kowalski / Kowalska). The phone rule is too trusting of a shared number; both are listed under known limits.
+- **These results are not fed back into the rules.** Changing the rules to fix a held-out miss and re-scoring would make this a tuning set too; a fix goes with a fresh held-out set.
 
 CI fails the build if rules-only auto-accept precision falls below 95%.
 
@@ -216,6 +241,7 @@ web/                     React review UI (Vite, TypeScript, Vitest)
 scripts/
   live_import_check.py   end-to-end check against a real HubSpot test account
 eval/                    labeled datasets, benchmark runner, threshold sweep, comparison report
+  heldout/               held-out exports and labels, never used for tuning
 ```
 
 ## Roadmap
@@ -224,11 +250,12 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
 - [x] **Week 4**: React review UI (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), sign-in, structured request logs
-- [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), final benchmark on held-out data, demo
+- [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), held-out benchmark ✅ (rules; Gemini run next), demo
 
 ## Known limits
 
 - **Imports run inside the request.** That suits exports of a few thousand rows (a few dozen batch requests). Larger files need a background worker, and Redis is already in the stack for it. Import speed against a real account is still to be measured.
 - **Contacts only.** Companies, deals and associations are out of scope.
+- **A shared phone number reads as the same person.** The held-out set showed the duplicate rule merging two colleagues on one office line. A matching phone should count only alongside a matching name, and a near-identical surname with the same email domain and phone (a typo) should be a candidate rather than a miss.
 - **Rollback restores, it doesn't time-travel.** It reverts only the properties this job wrote, and leaves alone any contact that changed after the import.
 - **Matching HubSpot's normalization.** "Unchanged" and conflict checks compare values ignoring case and surrounding spaces. If HubSpot reformats a value in another way (a phone number, say), that record is reported as updated rather than unchanged.
