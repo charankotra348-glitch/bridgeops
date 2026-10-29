@@ -1,0 +1,40 @@
+{
+  "_comment": "Second held-out set, written before any provider or agent ran on these files, to judge the agent resolver. Same format as eval/labels.json. Never used for tuning: no threshold, rule, prompt or agent setting may be chosen from these results.",
+  "german_crm.csv": {
+    "columns": {
+      "Kundennummer": "none", "Anrede": "none", "Vorname": "firstname", "Nachname": "lastname",
+      "E-Mail": "email", "Telefon": "phone", "Mobil": "mobilephone", "Firma": "company",
+      "Position": "jobtitle", "Straße": "address", "PLZ": "zip", "Ort": "city", "Land": "country",
+      "Status": "lifecyclestage", "Angelegt am": "none"
+    },
+    "values": {
+      "Status": {
+        "Kunde": "customer", "Interessent": "lead", "Ehemaliger Kunde": "other",
+        "Newsletter": "subscriber", "In Verhandlung": "opportunity"
+      }
+    }
+  },
+  "membership_roster.csv": {
+    "columns": {
+      "Member ID": "none", "Member Email": "email", "Given": "firstname", "Family": "lastname",
+      "Home Ph": "phone", "Cell Ph": "mobilephone", "Employer": "company", "Occupation": "jobtitle",
+      "Tier": "lifecyclestage", "Joined": "none", "Renewal Due": "none"
+    },
+    "values": {
+      "Tier": {"Gold": "customer", "Silver": "customer", "Lapsed": "other", "Trial": "lead"}
+    }
+  },
+  "support_users.json": {
+    "columns": {
+      "user_id": "none", "requester_email": "email", "requester_first": "firstname",
+      "requester_last": "lastname", "organization": "company", "role_label": "jobtitle",
+      "phone_direct": "phone", "site": "website", "plan_status": "lifecyclestage", "last_ticket_at": "none"
+    },
+    "values": {
+      "plan_status": {
+        "Paying - Enterprise": "customer", "Paying - Starter": "customer", "Free trial": "lead",
+        "Cancelled": "other", "Evaluating - demo scheduled": "opportunity"
+      }
+    }
+  }
+}

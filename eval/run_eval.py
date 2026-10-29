@@ -6,6 +6,7 @@
     python eval/run_eval.py --provider gemini --sweep # also sweep auto-accept thresholds
     python eval/run_eval.py --provider rules --min-precision 0.95   # CI gate
     python eval/run_eval.py --provider gemini --set heldout          # held-out benchmark
+    python eval/run_eval.py --provider agents --set heldout2         # agent resolver vs Gemini
 
 For every decision (column mapping, enum value, or duplicate pair) it records whether the
 pipeline auto-accepted it and whether the answer matches the label.
@@ -21,7 +22,8 @@ The sweep re-runs the pipeline at each threshold pair. Providers cache answers b
 input, so the sweep sends no extra requests. Thresholds picked on this set are
 tuned on the same data they are scored on; the held-out benchmark checks them.
 
---set heldout scores eval/heldout/ instead: exports in naming styles the tuning set
+--set heldout2 is a second held-out set, written to judge the agent resolver after the
+first one had been used. --set heldout scores eval/heldout/ instead: exports in naming styles the tuning set
 doesn't have, labeled before any run. It uses the configured thresholds as they are and
 refuses --sweep, since tuning on held-out data would make it one more tuning set.
 """
@@ -46,7 +48,7 @@ from app.profiling import profile_file, read_rows  # noqa: E402
 SWEEP = [round(0.50 + 0.05 * i, 2) for i in range(10)]  # 0.50 .. 0.95
 
 
-SETS = {"tuning": ROOT, "heldout": ROOT / "heldout"}
+SETS = {"tuning": ROOT, "heldout": ROOT / "heldout", "heldout2": ROOT / "heldout2"}
 
 
 def load_profiles(labels: dict, base: Path = ROOT) -> dict[str, dict]:
@@ -83,6 +85,8 @@ def score(labels: dict, profiles: dict, provider, mapping_threshold: float,
 
 
 def load_dedupe(base: Path = ROOT) -> tuple[dict, dict[str, list[dict]]]:
+    if not (base / "dedupe_labels.json").exists():  # a set may test mapping only
+        return {}, {}
     labels = json.loads((base / "dedupe_labels.json").read_text())
     data = {name: read_rows((base / "datasets" / "dedupe" / name).read_bytes(), name)[1]
             for name in labels if not name.startswith("_")}
@@ -199,7 +203,7 @@ def main():
                     help="tuning (default) or heldout")
     ap.add_argument("--out", default=str(ROOT / "results"))
     args = ap.parse_args()
-    if args.eval_set == "heldout" and args.sweep:
+    if args.eval_set != "tuning" and args.sweep:
         ap.error("--sweep is not allowed on the held-out set: thresholds are chosen on the tuning set only")
     base = SETS[args.eval_set]
 
@@ -238,6 +242,19 @@ def main():
         if usage["failed_requests"]:
             print("WARNING: some requests failed; their decisions abstained and went to review.")
 
+    trace = getattr(provider, "trace", None)
+    if trace:
+        outcomes: dict[str, int] = {}
+        for t in trace:
+            outcomes[t["outcome"]] = outcomes.get(t["outcome"], 0) + 1
+        print(f"\nAgents re-examined {len(trace)} uncertain decisions: "
+              + ", ".join(f"{n} {o}" for o, n in sorted(outcomes.items(), key=lambda x: -x[1])))
+        for t in trace:
+            if t["outcome"] == "accepted":
+                tools = ", ".join(t["tools"]) or "none"
+                print(f"  {t['key']}: {t['base']['answer']} @ {t['base']['confidence']:.2f} -> "
+                      f"{t['final']['answer']} @ {t['final']['confidence']:.2f} (tools: {tools})")
+
     wrong_auto = [r for r in rows if r["auto"] and not r["correct"]]
     if wrong_auto:
         print("\nAuto-accepted but WRONG (fix these first):")
@@ -254,7 +271,8 @@ def main():
 
     result = {"set": args.eval_set, "provider": provider.name, "model": getattr(provider, "model", None), "elapsed_s": elapsed,
               "thresholds": {"mapping": mt, "normalize": nt, "duplicate": dt}, "summary": summary,
-              "usage": usage, "calls": [asdict(u) for u in provider.usage], "rows": rows}
+              "usage": usage, "calls": [asdict(u) for u in provider.usage], "rows": rows,
+              "agent_trace": getattr(provider, "trace", None)}
 
     if args.sweep:
         result["sweep"] = sweep(labels, profiles, provider, args.sweep_precision)

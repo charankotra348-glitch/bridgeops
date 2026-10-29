@@ -20,7 +20,8 @@ upload ─▶ Profile ─▶ Map ─▶ Normalize ─▶ Dedupe ─▶ Validate 
 ```
 
 - **Rules first.** Deterministic rules (synonyms, abbreviations, value patterns, type checks) handle what they are sure of. A Y/N column named `email_opt_in` is *not* mapped to `email`, because its values don't look like emails.
-- **Models only for judgment calls.** Whatever the rules leave open goes to a `DecisionProvider`. The pipeline never calls a model directly, so Jev, an LLM (Gemini), or "abstain and ask a human" is a config switch (`DECISION_PROVIDER=jev|gemini|rules`).
+- **Models only for judgment calls.** Whatever the rules leave open goes to a `DecisionProvider`. The pipeline never calls a model directly, so Jev, an LLM (Gemini), Gemini plus agents, or "abstain and ask a human" is a config switch (`DECISION_PROVIDER=jev|gemini|agents|rules`).
+- **Agents only for what one call couldn't settle.** With `DECISION_PROVIDER=agents`, Gemini answers first; mapping and value answers below 0.90 confidence get a second look from an investigator agent with read-only tools and a verifier agent (below). They can only add automation they can justify: a rejection, a step limit or any failure keeps the original decision and its review.
 - **Duplicates the same way.** Same email (any case) or same phone + last name is a certain duplicate. Rows that only share a name, or a last name and company, become a yes/no "same person?" question for the decision model. Detection only flags; nothing is merged without review.
 - **Confidence gating.** Each decision is auto-accepted only above its threshold: 0.80 for mappings, 0.90 for values, 0.85 for duplicates. Values were raised from 0.85 after the Gemini sweep (below).
 - **Measured, not guessed.** Every model request records its latency and the token counts the provider reported. Missing counts stay missing, and cost is always labeled an estimate.
@@ -209,6 +210,42 @@ What the two runs found:
 
 CI fails the build if rules-only auto-accept precision falls below 95%.
 
+## Agent resolver
+
+One batched Gemini call answers most decisions confidently. The rest, like `CUST_STAT=PROSP` on the held-out set, are where a person spends review time. The agent resolver ([`app/decisions/agents.py`](api/app/decisions/agents.py)) takes a second look at those, one decision at a time, as a LangGraph graph:
+
+```
+Gemini (one batched call)
+   │ confident ───────────────────────────────▶ threshold gate as usual
+   │ below 0.90 (mappings and values only)
+   ▼
+investigator ──tool call──▶ list_columns · column_values · property     (read-only, at most 4 calls)
+   │ answer + evidence
+   ▼
+verifier ── accept ──▶ answer replaces Gemini's, at the lower of the two confidences ──▶ threshold gate
+         └─ reject ──▶ Gemini's decision unchanged (still goes to review)
+```
+
+- **Routing is code, not the model.** The graph decides when to call which agent; the model only answers. Limits per run: 4 tool calls per question and 30 escalated questions (`AGENT_MAX_STEPS`, `AGENT_MAX_ESCALATIONS`), so a strange file can't turn into an unbounded bill.
+- **The tools read the uploaded file's profile**: every column with samples, one column's full value counts, a HubSpot property's definition and options. They can't write anything.
+- **Every way to fail keeps the review.** A rejected answer, the step limit, a choice outside the options, unparseable JSON, or a model error all return Gemini's original decision. A failed Gemini call is never escalated.
+- **Duplicate pairs are not escalated**: two rows are all the evidence there is. The held-out duplicate errors come from rules that never reach a model anyway.
+- **Each escalation is traced** (base answer, tools used, candidate, outcome) in the eval output, and every agent request is counted in the usage and cost totals.
+
+**Measured on a second held-out set.** The first held-out set had already been used once, and the agents were designed knowing its failures, so judging them there would flatter them. `eval/heldout2/` is three new exports labeled before anything ran on them: a German CRM export (`Vorname`, `Status = Interessent`), a membership roster (`Tier = Lapsed`) and a support-tool JSON export (`plan_status = Evaluating - demo scheduled`). Rules alone automate 29.3% of its 41 decisions at 100% precision.
+
+```bash
+python eval/run_eval.py --provider gemini --set heldout2
+python eval/run_eval.py --provider agents --set heldout2   # needs GEMINI_API_KEY
+python eval/compare.py --set heldout2
+```
+
+| Provider | Coverage / precision (41 decisions) | Wrong auto-accepts | Requests | Est. cost |
+| --- | --- | --- | --- | --- |
+| Rules only | 29.3% / 100% | 0 | 0 | — |
+| Rules + Gemini | not run yet | | | |
+| Rules + Gemini + agents | not run yet | | | |
+
 ## Project layout
 
 ```
@@ -225,6 +262,7 @@ api/
       base.py            Question / Decision / DecisionProvider / CallUsage interface
       jev.py             Jev provider (batched, cached, fail-soft)
       gemini.py          Gemini LLM baseline (batched JSON, validated, cached, fail-soft)
+      agents.py          agent resolver: LangGraph investigator + verifier for uncertain answers
       abstain.py         rules-only baseline provider
     models.py            sources, jobs, mappings, decisions, duplicate_groups, audit_log
     migrate.py           runs Alembic migrations
@@ -236,7 +274,7 @@ api/
     execution/
       plan.py            reviewed decisions -> validated HubSpot records (pure, no network)
       run.py             dry run, idempotent import, rollback with conflict detection
-  tests/                 74 tests (run on SQLite and Postgres), incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
+  tests/                 85 tests (run on SQLite and Postgres), incl. an in-memory fake HubSpot (tests/fake_hubspot.py)
 web/                     React review UI (Vite, TypeScript, Vitest)
   src/review.ts          what still needs a person; which stage a job is in
   src/views/             Upload, Review, DryRun, Import
@@ -244,6 +282,7 @@ scripts/
   live_import_check.py   end-to-end check against a real HubSpot test account
 eval/                    labeled datasets, benchmark runner, threshold sweep, comparison report
   heldout/               held-out exports and labels, never used for tuning
+  heldout2/              a second held-out set, written to judge the agent resolver
 ```
 
 ## Roadmap
@@ -253,6 +292,7 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
 - [x] **Week 4**: React review UI (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), sign-in, structured request logs
 - [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), held-out benchmark ✅, demo
+- [ ] **Week 6**: agent resolver ✅ (investigator + verifier, tested with scripted models), measured on a second held-out set
 
 ## Known limits
 

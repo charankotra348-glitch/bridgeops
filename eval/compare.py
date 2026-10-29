@@ -69,7 +69,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default=str(ROOT / "results"))
     ap.add_argument("--write", default=None)
-    ap.add_argument("--set", dest="eval_set", default="tuning", choices=["tuning", "heldout"])
+    ap.add_argument("--set", dest="eval_set", default="tuning", choices=["tuning", "heldout", "heldout2"])
     args = ap.parse_args()
     report = build(Path(args.results), "eval" if args.eval_set == "tuning" else "heldout")
     print(report)

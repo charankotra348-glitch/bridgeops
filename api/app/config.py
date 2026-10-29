@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     auto_migrate: bool = True  # run Alembic migrations on startup; turn off when a deploy step runs them
 
-    decision_provider: str = "rules"  # "rules" | "gemini" | "jev"
+    decision_provider: str = "rules"  # "rules" | "gemini" | "agents" | "jev"
     typesafe_api_key: str = ""
     typesafe_api_url: str = "https://api.typesafe.ai/v1/systemone"
     jev_model: str = "jev-latest"
@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     gemini_timeout_s: float = 30.0
+
+    # Agent resolver (DECISION_PROVIDER=agents): Gemini answers first; mapping and value answers
+    # below this confidence get a second look from an investigator and a verifier agent.
+    agent_escalate_below: float = 0.90
+    agent_max_steps: int = 4          # tool calls per question
+    agent_max_escalations: int = 30   # questions per run that may be escalated
 
     cors_origins: str = "http://localhost:5173"   # comma-separated; the web UI's dev server
 

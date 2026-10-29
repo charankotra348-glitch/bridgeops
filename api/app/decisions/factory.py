@@ -1,10 +1,11 @@
 from app.config import Settings, get_settings
 from app.decisions.abstain import AbstainProvider
+from app.decisions.agents import AgentResolver, GeminiChat
 from app.decisions.base import DecisionProvider
 from app.decisions.gemini import GeminiProvider
 from app.decisions.jev import JevProvider
 
-PROVIDERS = ("rules", "gemini", "jev")
+PROVIDERS = ("rules", "gemini", "agents", "jev")
 
 
 def get_provider(settings: Settings | None = None, name: str | None = None) -> DecisionProvider:
@@ -16,6 +17,14 @@ def get_provider(settings: Settings | None = None, name: str | None = None) -> D
     if name == "gemini":
         return GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model,
                               timeout_s=settings.gemini_timeout_s)
+    if name == "agents":
+        base = GeminiProvider(api_key=settings.gemini_api_key, model=settings.gemini_model,
+                              timeout_s=settings.gemini_timeout_s)
+        chat = GeminiChat(api_key=settings.gemini_api_key, model=settings.gemini_model,
+                          timeout_s=settings.gemini_timeout_s)
+        return AgentResolver(base, chat, escalate_below=settings.agent_escalate_below,
+                             max_steps=settings.agent_max_steps,
+                             max_escalations=settings.agent_max_escalations)
     if name == "rules":
         return AbstainProvider()
     raise ValueError(f"Unknown decision provider: {name}")

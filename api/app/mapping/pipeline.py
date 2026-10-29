@@ -89,6 +89,9 @@ def plan_mappings(profile: dict, provider: DecisionProvider, mapping_threshold: 
                   normalize_threshold: float = 0.90) -> MappingPlan:
     columns = profile["columns"]
     by_name = {c["name"]: c for c in columns}
+    set_context = getattr(provider, "set_context", None)
+    if set_context is not None:  # providers that look things up (the agent resolver) see the whole file
+        set_context(profile)
 
     # 1) Rules
     rule_results = rules.resolve_conflicts([rules.map_column(c["name"], c["inferred_type"]) for c in columns])
