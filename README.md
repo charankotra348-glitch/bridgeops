@@ -195,14 +195,16 @@ python eval/compare.py --set heldout
 | Provider | Column mapping (52) | Value normalization | Duplicate pairs (7) | **All** | Wrong auto-accepts |
 | --- | --- | --- | --- | --- | --- |
 | Rules only | 59.6% / 100% | 83.3% / 100% (6) | 85.7% / 66.7% | **64.6% / 95.2%** (65) | 2 |
-| Rules + Gemini 3.5 Flash-Lite | not run yet | | | | |
+| Rules + Gemini 3.5 Flash-Lite | 98.1% / 100% | 85.7% / 100% (21) | 100% / 71.4% | **95.0% / 97.4%** (80) | 2 |
 
-Coverage / precision of auto-accepted decisions, thresholds 0.80 / 0.90 / 0.85. Values are scored only for enum columns that got mapped, so the count depends on the provider.
+Coverage / precision of auto-accepted decisions, thresholds 0.80 / 0.90 / 0.85. Values are scored only for enum columns that got mapped, so the count depends on the provider. The Gemini run sent 9 requests (34 questions, 1.4 s mean) for about $0.006.
 
-What the rules-only run found:
+What the two runs found:
 
 - **Column mapping held up: no wrong auto-accept in 52 columns.** Coverage dropped from 72% to 60% because the new styles (`nameGiven`, `PROV_CD`, `Relationship`) aren't in the synonym lists, and those went to review instead of being guessed.
 - **Duplicate detection made both wrong calls.** It merged two different people who share an office phone line (Laura and Michael Bennett at the same firm), and it missed a surname typo (Kowalski / Kowalska). The phone rule is too trusting of a shared number; both are listed under known limits.
+- **With Gemini, the thresholds picked on the tuning set held.** 69 column and value decisions were auto-accepted with none wrong (true precision ≥ ~96% by the rule of three). The one wrong model answer, `CUST_STAT=PROSP` → lead at 0.80, sat below the 0.90 value threshold and went to review, which is the case that threshold was raised for. `Secondary Email` → email (0.85) also went to review, because a rule had already mapped the primary `Email` column to that property, and the pipeline never lets a model answer overwrite a rule.
+- **Both wrong auto-accepts in the Gemini run are the duplicate rules again,** not the model: the shared office line and the surname typo never reach Gemini.
 - **These results are not fed back into the rules.** Changing the rules to fix a held-out miss and re-scoring would make this a tuning set too; a fix goes with a fresh held-out set.
 
 CI fails the build if rules-only auto-accept precision falls below 95%.
@@ -250,7 +252,7 @@ eval/                    labeled datasets, benchmark runner, threshold sweep, co
 - [ ] **Week 2**: LLM baseline provider ✅, duplicate detection ✅, threshold sweep ✅, Alembic ✅, Jev run live and benchmarked against Gemini (waiting on API key)
 - [x] **Week 3**: transforms, validation against live HubSpot property definitions, idempotent batched execution, retries, rate limiting, dry run, rollback
 - [x] **Week 4**: React review UI (upload, review queue with mapping and value editors, duplicate comparison, dry run, import and rollback), sign-in, structured request logs
-- [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), held-out benchmark ✅ (rules; Gemini run next), demo
+- [ ] **Week 5**: deployment ✅ (Docker image, Render blueprint, Postgres in CI), held-out benchmark ✅, demo
 
 ## Known limits
 
